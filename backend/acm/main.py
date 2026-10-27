@@ -14,18 +14,29 @@ from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ConfigDict
 from .common import now, secret_pair, digest
-from .storage import Storage
+from .storage import Storage, open_storage
 from .models import DraftInput, AgentChange
 
 
 class Login(BaseModel):
     username: str = Field(min_length=1, max_length=100)
     password: str = Field(min_length=1, max_length=200)
-    code: str = Field(pattern=r"^\d{6}$")
+    code: str = Field(default="", pattern=r"^(?:|\d{6})$")
 
 
 class Reauth(BaseModel):
     password: str = Field(min_length=1, max_length=200)
+    code: str = Field(default="", pattern=r"^(?:|\d{6})$")
+
+
+class Setup(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    username: str = Field(min_length=3, max_length=64, pattern=r"^[^\s\x00-\x1f]+$")
+    password: str = Field(min_length=12, max_length=200)
+    confirm_password: str = Field(min_length=12, max_length=200)
+
+
+class TotpConfirmation(BaseModel):
     code: str = Field(pattern=r"^\d{6}$")
 
 
@@ -61,7 +72,7 @@ class Agent:
 
 def create_app(storage=None, agent=None, *, origin=None, secure=None, static=None):
     data = Path(os.getenv("ACM_DATA", "runtime/web"))
-    s = storage or Storage(data / "web.sqlite", data / "master.key")
+    s = storage or open_storage(data)
     a = agent or Agent(os.getenv("ACM_AGENT_SOCKET", "runtime/agent.sock"))
     origin = origin or os.getenv("ACM_ORIGIN", "http://localhost:8098")
     secure = (
@@ -76,7 +87,7 @@ def create_app(storage=None, agent=None, *, origin=None, secure=None, static=Non
         # Pydantic's input/context fields can contain passwords. Never return them.
         return JSONResponse(
             {
-                "detail": "输入格式不正确，请检查必填字段、地址及认证代码",
+                "detail": "输入格式不正确，请检查页面填写内容",
                 "fields": [".".join(str(x) for x in e["loc"]) for e in exc.errors()],
             },
             status_code=422,
@@ -110,7 +121,7 @@ def create_app(storage=None, agent=None, *, origin=None, secure=None, static=Non
         key = digest(token.encode())
         with s.connect() as c:
             row = c.execute(
-                "SELECT sessions.*,admins.role FROM sessions JOIN admins ON admins.username=sessions.username WHERE sessions.id=?",
+                "SELECT sessions.*,admins.role,admins.totp_enabled FROM sessions JOIN admins ON admins.username=sessions.username WHERE sessions.id=?",
                 (key,),
             ).fetchone()
             if not row or row["created"] < now() - 28800 or row["seen"] < now() - 1800:
@@ -132,17 +143,15 @@ def create_app(storage=None, agent=None, *, origin=None, secure=None, static=Non
             raise HTTPException(403, "请先完成近期安全验证")
         return u
 
-    def verify(username, password, code):
+    def verify(username, password, code=""):
         with s.connect() as c:
             r = c.execute(
                 "SELECT * FROM admins WHERE username=?", (username,)
             ).fetchone()
         ok = False
         try:
-            if r:
-                ok = PasswordHasher().verify(r["password"], password) and pyotp.TOTP(
-                    s.decrypt(r["totp"], "totp:" + username)
-                ).verify(code, valid_window=1)
+            if r and not r["needs_setup"]:
+                ok = PasswordHasher().verify(r["password"], password)
             else:
                 PasswordHasher().verify(
                     "$argon2id$v=19$m=65536,t=3,p=4$YWFhYWFhYWFhYWFhYWFhYQ$5YnZTkJy8I8n2QWbLa8SY4p8GkgpXvJjX4jC9m4vWJE",
@@ -151,28 +160,30 @@ def create_app(storage=None, agent=None, *, origin=None, secure=None, static=Non
         except Exception:
             pass
         if not ok:
-            raise HTTPException(401, "账号、密码或动态验证码不正确")
+            raise HTTPException(401, "账号或密码不正确")
+        if r["totp_enabled"]:
+            valid = False
+            try:
+                valid = bool(code) and pyotp.TOTP(
+                    s.decrypt(r["totp"], "totp:" + username)
+                ).verify(code, valid_window=1)
+            except Exception:
+                pass
+            if not valid:
+                raise HTTPException(
+                    401, "请输入正确的动态验证码", headers={"X-ACM-TOTP-Required": "1"}
+                )
 
-    @app.get("/api/health")
-    def health():
-        return {"status": "ok", "version": "0.1.0"}
-
-    @app.post("/api/login")
-    def login(body: Login, req: Request):
-        ip = req.client.host if req.client else "local"
-        if not s.limit("login:" + ip, maximum=12):
-            raise HTTPException(429, "尝试次数较多，请稍后再试")
-        verify(body.username, body.password, body.code)
+    def session_response(username):
         s.cleanup()
         token = secrets.token_urlsafe(32)
         csrf = secrets.token_urlsafe(24)
         with s.connect() as c:
             c.execute(
                 "INSERT INTO sessions VALUES(?,?,?,?,?,?)",
-                (digest(token.encode()), body.username, csrf, now(), now(), now()),
+                (digest(token.encode()), username, csrf, now(), now(), now()),
             )
-        s.audit(body.username, "login")
-        r = JSONResponse({"username": body.username, "csrf": csrf})
+        r = JSONResponse({"username": username, "csrf": csrf})
         r.set_cookie(
             "acm_session",
             token,
@@ -184,9 +195,128 @@ def create_app(storage=None, agent=None, *, origin=None, secure=None, static=Non
         )
         return r
 
+    @app.get("/api/auth/status")
+    def auth_status():
+        with s.connect() as c:
+            return {"setup_required": s.setup_required(c)}
+
+    @app.post("/api/setup")
+    def setup(body: Setup, req: Request):
+        if body.password != body.confirm_password:
+            raise HTTPException(422, "两次输入的密码不一致")
+        ip = req.client.host if req.client else "local"
+        if not s.limit("setup:" + ip, maximum=8):
+            raise HTTPException(429, "尝试次数较多，请稍后再试")
+        hashed = PasswordHasher().hash(body.password)
+        with s.connect() as c:
+            c.execute("BEGIN IMMEDIATE")
+            if not s.setup_required(c):
+                raise HTTPException(409, "管理员账户已建立，请登录")
+            old = c.execute(
+                "SELECT username FROM admins WHERE needs_setup=1"
+            ).fetchone()
+            if old:
+                c.execute("DELETE FROM admins WHERE username=?", (old["username"],))
+            c.execute(
+                "INSERT INTO admins(username,password,totp,role,totp_enabled,needs_setup) VALUES(?,?,NULL,'admin',0,0)",
+                (body.username, hashed),
+            )
+            c.execute("DELETE FROM sessions")
+            c.execute("DELETE FROM totp_enrollments")
+        s.audit(body.username, "web-setup-completed")
+        return session_response(body.username)
+
+    @app.get("/api/settings/security")
+    def security_settings(u=Depends(current)):
+        return {"username": u["username"], "totp_enabled": bool(u["totp_enabled"])}
+
+    @app.post("/api/settings/totp/begin")
+    def begin_totp(body: Reauth, u=Depends(admin)):
+        if not s.limit("totp:" + u["username"]):
+            raise HTTPException(429, "尝试次数较多，请稍后再试")
+        verify(u["username"], body.password, body.code)
+        if u["totp_enabled"]:
+            raise HTTPException(409, "双因素认证已开启")
+        seed = pyotp.random_base32()
+        with s.connect() as c:
+            c.execute(
+                "INSERT OR REPLACE INTO totp_enrollments VALUES(?,?,?)",
+                (
+                    u["username"],
+                    s.encrypt(seed, "enroll:" + u["username"]),
+                    now() + 600,
+                ),
+            )
+        return {
+            "secret": seed,
+            "uri": pyotp.TOTP(seed).provisioning_uri(
+                u["username"], issuer_name="Authelia Client Manager"
+            ),
+            "expires_in": 600,
+        }
+
+    @app.post("/api/settings/totp/confirm")
+    def confirm_totp(body: TotpConfirmation, u=Depends(admin)):
+        if not s.limit("totp-confirm:" + u["username"]):
+            raise HTTPException(429, "尝试次数较多，请稍后再试")
+        with s.connect() as c:
+            c.execute("BEGIN IMMEDIATE")
+            row = c.execute(
+                "SELECT * FROM totp_enrollments WHERE username=?", (u["username"],)
+            ).fetchone()
+            if not row or row["expires"] < now():
+                raise HTTPException(410, "绑定已过期，请重新开始")
+            seed = s.decrypt(row["secret"], "enroll:" + u["username"])
+            if not pyotp.TOTP(seed).verify(body.code, valid_window=1):
+                raise HTTPException(400, "动态验证码不正确")
+            c.execute(
+                "UPDATE admins SET totp=?,totp_enabled=1 WHERE username=?",
+                (s.encrypt(seed, "totp:" + u["username"]), u["username"]),
+            )
+            c.execute("DELETE FROM totp_enrollments WHERE username=?", (u["username"],))
+            c.execute(
+                "DELETE FROM sessions WHERE username=? AND id<>?",
+                (u["username"], u["id"]),
+            )
+            c.execute("UPDATE sessions SET reauth=? WHERE id=?", (now(), u["id"]))
+        s.audit(u["username"], "totp-enabled")
+        return {"ok": True}
+
+    @app.post("/api/settings/totp/disable")
+    def disable_totp(body: Reauth, u=Depends(admin)):
+        if not s.limit("totp-disable:" + u["username"]):
+            raise HTTPException(429, "尝试次数较多，请稍后再试")
+        verify(u["username"], body.password, body.code)
+        with s.connect() as c:
+            c.execute(
+                "UPDATE admins SET totp=NULL,totp_enabled=0 WHERE username=?",
+                (u["username"],),
+            )
+            c.execute("DELETE FROM totp_enrollments WHERE username=?", (u["username"],))
+            c.execute(
+                "DELETE FROM sessions WHERE username=? AND id<>?",
+                (u["username"], u["id"]),
+            )
+            c.execute("UPDATE sessions SET reauth=? WHERE id=?", (now(), u["id"]))
+        s.audit(u["username"], "totp-disabled")
+        return {"ok": True}
+
+    @app.get("/api/health")
+    def health():
+        return {"status": "ok", "version": "0.1.1"}
+
+    @app.post("/api/login")
+    def login(body: Login, req: Request):
+        ip = req.client.host if req.client else "local"
+        if not s.limit("login:" + ip, maximum=12):
+            raise HTTPException(429, "尝试次数较多，请稍后再试")
+        verify(body.username, body.password, body.code)
+        s.audit(body.username, "login")
+        return session_response(body.username)
+
     @app.get("/api/me")
     def me(u=Depends(current)):
-        return {k: u[k] for k in ("username", "role", "csrf", "reauth")}
+        return {k: u[k] for k in ("username", "role", "csrf", "reauth", "totp_enabled")}
 
     @app.post("/api/logout")
     def logout(u=Depends(current)):

@@ -6,6 +6,8 @@ The agent has Docker daemon access. This is effectively host-administrator autho
 
 All provider YAML, old client credentials and full configuration backups stay on the agent side. API validation errors omit supplied values and native validator output is not relayed to browsers because it can contain secrets.
 
+The first administrator is created through a same-origin, transaction-guarded setup form only when no account exists, or after a host administrator explicitly prepares a single-account recovery. Restrict access to the intended operator until setup is complete. Setup cannot be reopened through the web API. TOTP is opt-in and requires confirmation before activation; changing enrollment revokes other sessions.
+
 New secrets use PBKDF2-SHA512 for provider storage and AES-GCM for temporary delivery. The independent master key is stored in the web data directory, never in the database, image or source. Back up that key securely with the data. Logical deletion of a delivered secret does not guarantee physical erasure from SQLite, WAL, backups or storage media.
 
 Use trusted HTTPS for exposed access. The explicit loopback HTTP profile is intended only for local demonstration or an SSH tunnel. Do not trust arbitrary forwarded identity headers. Proxy and application logs must not record cookies, credentials, authorization codes, tokens or request bodies.

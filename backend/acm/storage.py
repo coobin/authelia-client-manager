@@ -7,6 +7,25 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from .common import DB, now
 
 
+def open_storage(data):
+    data = Path(data)
+    data.mkdir(parents=True, exist_ok=True, mode=0o700)
+    key = data / "master.key"
+    if not key.exists():
+        if (data / "web.sqlite").exists():
+            raise RuntimeError(
+                "Database exists without its master key; restore the key before starting"
+            )
+        try:
+            fd = os.open(key, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            pass
+        else:
+            with os.fdopen(fd, "wb") as f:
+                f.write(secrets.token_bytes(32))
+    return Storage(data / "web.sqlite", key)
+
+
 class Storage(DB):
     def __init__(self, path, key_path):
         super().__init__(path)
@@ -23,7 +42,30 @@ CREATE TABLE IF NOT EXISTS deliveries(id TEXT PRIMARY KEY,draft_id TEXT,secret B
 CREATE TABLE IF NOT EXISTS metadata(client_id TEXT PRIMARY KEY,owner TEXT,environment TEXT);
 CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY,at INTEGER,actor TEXT,action TEXT,target TEXT);
 CREATE TABLE IF NOT EXISTS limits(key TEXT PRIMARY KEY,count INTEGER,until INTEGER);
+CREATE TABLE IF NOT EXISTS totp_enrollments(username TEXT PRIMARY KEY,secret BLOB,expires INTEGER);
 """)
+
+        # Preserve legacy enrollment until explicitly changed by the administrator.
+        with self.connect() as c:
+            c.execute("BEGIN IMMEDIATE")
+            columns = {r["name"] for r in c.execute("PRAGMA table_info(admins)")}
+            if "totp_enabled" not in columns:
+                c.execute(
+                    "ALTER TABLE admins ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0"
+                )
+                c.execute("UPDATE admins SET totp_enabled=1 WHERE totp IS NOT NULL")
+            if "needs_setup" not in columns:
+                c.execute(
+                    "ALTER TABLE admins ADD COLUMN needs_setup INTEGER NOT NULL DEFAULT 0"
+                )
+
+    def setup_required(self, c):
+        rows = c.execute("SELECT username,role,needs_setup FROM admins").fetchall()
+        return not rows or (
+            len(rows) == 1
+            and rows[0]["role"] == "admin"
+            and bool(rows[0]["needs_setup"])
+        )
 
     def encrypt(self, plain, context):
         nonce = secrets.token_bytes(12)
@@ -42,6 +84,7 @@ CREATE TABLE IF NOT EXISTS limits(key TEXT PRIMARY KEY,count INTEGER,until INTEG
     def cleanup(self):
         with self.connect() as c:
             c.execute("DELETE FROM deliveries WHERE expires<? OR claimed=1", (now(),))
+            c.execute("DELETE FROM totp_enrollments WHERE expires<?", (now(),))
             c.execute(
                 "DELETE FROM sessions WHERE created<? OR seen<?",
                 (now() - 28800, now() - 1800),

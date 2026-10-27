@@ -13,7 +13,7 @@ Initial release targeting **Authelia 4.39.1**, a single YAML configuration and a
 - Generate hashed client credentials with encrypted, expiring, single-claim delivery.
 - Validate with the actual provider version; publish with revision checks, backups and atomic replacement.
 - Restart only the configured target, record durable outcomes and compensate failed deployments.
-- Independent Argon2id + TOTP administrator login, CSRF protection and audit records.
+- Browser-based first administrator setup, Argon2id passwords and optional TOTP, CSRF protection and audit records.
 - View and copy application connection parameters.
 
 Saving a draft does not publish it. Publishing restarts the target provider and can interrupt in-flight login. Disabling a client does not end existing application sessions. Secret rotation requires coordination with the application owner.
@@ -30,7 +30,7 @@ npm run build --prefix frontend
 ./scripts/demo.sh
 ```
 
-Open `http://localhost:8098`. Initial private credentials and the authenticator setup URI are written to `runtime/web/initial-login.txt` with owner-only permissions. Add the TOTP account to your authenticator and protect the initial file. The `runtime` directory is ignored by Git and excluded from Docker builds.
+Open `http://localhost:8098` and choose your administrator account and password in the browser. TOTP is off by default; enable it under Settings when needed. The initial setup route closes after the first account is created. The `runtime` directory is ignored by Git and excluded from Docker builds.
 
 ## Production deployment
 
@@ -39,7 +39,7 @@ Read [deployment instructions](docs/DEPLOYMENT.md) and [security boundaries](SEC
 ```sh
 npm ci --prefix frontend
 npm run build --prefix frontend
-docker build -t authelia-client-manager:0.1.0 .
+docker build -t authelia-client-manager:0.1.1 .
 ```
 
 The web container has no Docker socket or original provider configuration. The separate agent container has Docker access and must be treated as a high-privilege component. It uses fixed local target settings and has no TCP network. Start in read-only mode and verify imported applications before enabling writes.
@@ -64,3 +64,7 @@ No telemetry is configured. Real deployment settings, employee information, clie
 The first release publishes one draft per transaction. It deliberately does not merge client arrays from multiple configuration files. Latest-release rollback is supported; arbitrary historical restores must be reviewed as new changes. Imported clients with unsupported schemas are read-only.
 
 License: MIT. Contributions must use fictional examples and include appropriate regression tests.
+
+## Authentication changes in 0.1.1
+
+Fresh installs automatically initialize private storage and show a one-time administrator setup form. Password-only login is the default. Enabling TOTP under Settings requires the current password and a successful code confirmation; disabling it requires the password and current code. Legacy enrolled accounts stay enrolled during automatic schema migration. The host-only `prepare-setup` recovery command can explicitly return a single designated administrator to browser setup while preserving application data.

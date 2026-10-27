@@ -17,6 +17,7 @@ import {
   LockKeyhole,
 } from "lucide-react";
 import "./style.css";
+import QRCode from "qrcode";
 type Client = {
   client_id: string;
   client_name: string;
@@ -77,8 +78,13 @@ async function api(path: string, body?: unknown) {
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const d = await r.json();
-  if (!r.ok)
-    throw Error(typeof d.detail === "string" ? d.detail : "输入不正确");
+  if (!r.ok) {
+    const error = new Error(
+      typeof d.detail === "string" ? d.detail : "输入不正确",
+    ) as Error & { totpRequired?: boolean };
+    error.totpRequired = r.headers.get("X-ACM-TOTP-Required") === "1";
+    throw error;
+  }
   return d;
 }
 function App() {
@@ -104,6 +110,9 @@ function App() {
   const [login, setLogin] = useState({ username: "", password: "", code: "" }),
     [reauth, setReauth] = useState(false),
     [reauthData, setReauthData] = useState({ password: "", code: "" });
+  const [setupRequired, setSetupRequired] = useState(false),
+    [confirmPassword, setConfirmPassword] = useState(""),
+    [loginTotp, setLoginTotp] = useState(false);
   const admin = me?.role === "admin";
   async function run(fn: () => Promise<void>) {
     setBusy(true);
@@ -128,12 +137,18 @@ function App() {
     if (admin) setDeliveries(await api("/deliveries"));
   }
   useEffect(() => {
-    api("/me")
-      .then((m) => {
-        csrf = m.csrf;
-        setMe(m);
+    api("/auth/status")
+      .then(async (status) => {
+        setSetupRequired(status.setup_required);
+        if (!status.setup_required) {
+          try {
+            const m = await api("/me");
+            csrf = m.csrf;
+            setMe(m);
+          } catch {}
+        }
       })
-      .catch(() => {})
+      .catch((e) => setError(e.message))
       .finally(() => setLoaded(true));
   }, []);
   useEffect(() => {
@@ -254,56 +269,108 @@ function App() {
           onSubmit={(e) => {
             e.preventDefault();
             run(async () => {
-              const m = await api("/login", login);
-              csrf = m.csrf;
-              setMe(await api("/me"));
-              setLogin({ username: "", password: "", code: "" });
+              if (setupRequired && login.password !== confirmPassword)
+                throw new Error("两次输入的密码不一致");
+              try {
+                const m = await api(
+                  setupRequired ? "/setup" : "/login",
+                  setupRequired
+                    ? {
+                        username: login.username,
+                        password: login.password,
+                        confirm_password: confirmPassword,
+                      }
+                    : login,
+                );
+                csrf = m.csrf;
+                setMe(await api("/me"));
+                setSetupRequired(false);
+                setLogin({ username: "", password: "", code: "" });
+                setConfirmPassword("");
+                setLoginTotp(false);
+              } catch (e) {
+                if ((e as any).totpRequired) setLoginTotp(true);
+                throw e;
+              }
             });
           }}
         >
           <ShieldCheck size={28} />
-          <h2>管理员登录</h2>
-          <p>使用独立管理账户与验证器动态码。</p>
+          <h2>{setupRequired ? "创建管理员账户" : "管理员登录"}</h2>
+          <p>
+            {setupRequired
+              ? "设置你的账号和密码，完成后即可开始使用。"
+              : "输入账号和密码登录。"}
+          </p>
           <label>
             账号
             <input
               required
               autoComplete="username"
+              minLength={setupRequired ? 3 : 1}
+              maxLength={64}
               value={login.username}
-              onChange={(e) => setLogin({ ...login, username: e.target.value })}
+              onChange={(e) => {
+                setLogin({ ...login, username: e.target.value, code: "" });
+                setLoginTotp(false);
+              }}
             />
+            {setupRequired && <small>3 至 64 个字符，不含空格。</small>}
           </label>
           <label>
             密码
             <input
               required
               type="password"
-              autoComplete="current-password"
+              autoComplete={setupRequired ? "new-password" : "current-password"}
+              minLength={setupRequired ? 12 : 1}
+              maxLength={200}
               value={login.password}
               onChange={(e) => setLogin({ ...login, password: e.target.value })}
             />
+            {setupRequired && <small>至少 12 个字符。</small>}
           </label>
-          <label>
-            动态验证码
-            <input
-              required
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              pattern="[0-9]{6}"
-              maxLength={6}
-              value={login.code}
-              onChange={(e) => setLogin({ ...login, code: e.target.value })}
-            />
-          </label>
+          {setupRequired && (
+            <label>
+              确认密码
+              <input
+                required
+                type="password"
+                autoComplete="new-password"
+                minLength={12}
+                maxLength={200}
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+              />
+            </label>
+          )}
+          {!setupRequired && loginTotp && (
+            <label>
+              动态验证码
+              <input
+                required
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                pattern="[0-9]{6}"
+                maxLength={6}
+                value={login.code}
+                onChange={(e) => setLogin({ ...login, code: e.target.value })}
+              />
+            </label>
+          )}
           {error && (
             <p role="alert" className="error">
               {error}
             </p>
           )}
           <button className="primary" disabled={busy}>
-            登录
+            {setupRequired ? "创建账户并开始使用" : "登录"}
           </button>
-          <small>首次账户由服务器管理员建立。</small>
+          <small>
+            {setupRequired
+              ? "双因素认证默认关闭，可在设置中开启。"
+              : "开启双因素认证的账户需要验证动态码。"}
+          </small>
         </form>
       </main>
     );
@@ -322,6 +389,7 @@ function App() {
             ["drafts", "待发布", ClipboardList],
             ["jobs", "发布记录", History],
             ["audit", "操作记录", ShieldCheck],
+            ...(admin ? [["settings", "设置", LockKeyhole]] : []),
           ].map(([id, title, Icon]) => (
             <button
               key={id as string}
@@ -374,6 +442,7 @@ function App() {
                     drafts: "待发布",
                     jobs: "发布记录",
                     audit: "操作记录",
+                    settings: "设置",
                   } as any
                 )[tab]
               }
@@ -386,6 +455,7 @@ function App() {
                     drafts: "检查待发布变更",
                     jobs: "查看发布结果",
                     audit: "查看管理操作",
+                    settings: "账户安全设置",
                   } as any
                 )[tab]
               }
@@ -432,6 +502,12 @@ function App() {
               <X size={15} />
             </button>
           </div>
+        )}
+        {tab === "settings" && (
+          <SecuritySettings
+            me={me}
+            updated={async () => setMe(await api("/me"))}
+          />
         )}
         {tab === "clients" && (
           <>
@@ -1094,18 +1170,20 @@ function App() {
                 }
               />
             </label>
-            <label>
-              动态验证码
-              <input
-                inputMode="numeric"
-                pattern="[0-9]{6}"
-                required
-                value={reauthData.code}
-                onChange={(e) =>
-                  setReauthData({ ...reauthData, code: e.target.value })
-                }
-              />
-            </label>
+            {Boolean(me.totp_enabled) && (
+              <label>
+                动态验证码
+                <input
+                  inputMode="numeric"
+                  pattern="[0-9]{6}"
+                  required
+                  value={reauthData.code}
+                  onChange={(e) =>
+                    setReauthData({ ...reauthData, code: e.target.value })
+                  }
+                />
+              </label>
+            )}
             {error && <p className="error">{error}</p>}
             <button className="primary" disabled={busy}>
               确认
@@ -1116,6 +1194,148 @@ function App() {
     </div>
   );
 }
+function SecuritySettings({
+  me,
+  updated,
+}: {
+  me: any;
+  updated: () => Promise<void>;
+}) {
+  const [mode, setMode] = useState<"enable" | "disable" | null>(null),
+    [password, setPassword] = useState(""),
+    [code, setCode] = useState(""),
+    [enrollment, setEnrollment] = useState<any>(null),
+    [qr, setQr] = useState(""),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState(""),
+    [message, setMessage] = useState("");
+  function close() {
+    setMode(null);
+    setPassword("");
+    setCode("");
+    setEnrollment(null);
+    setQr("");
+    setError("");
+  }
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      if (mode === "disable") {
+        await api("/settings/totp/disable", { password, code });
+        await updated();
+        close();
+        setMessage("双因素认证已关闭，下次使用账号和密码登录。");
+      } else if (!enrollment) {
+        const d = await api("/settings/totp/begin", { password });
+        setQr(await QRCode.toDataURL(d.uri, { width: 224, margin: 2 }));
+        setEnrollment(d);
+        setPassword("");
+      } else {
+        await api("/settings/totp/confirm", { code });
+        await updated();
+        close();
+        setMessage("双因素认证已开启，下次登录需要动态验证码。");
+      }
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <section className="settings-panel">
+      <h2>账户安全</h2>
+      <p>当前账户：{me.username}</p>
+      {message && (
+        <div className="notice" role="status">
+          {message}
+        </div>
+      )}
+      <div className="security-option">
+        <div>
+          <h3>
+            双因素认证 TOTP{" "}
+            <span className={me.totp_enabled ? "tag success" : "tag"}>
+              {me.totp_enabled ? "已开启" : "未开启"}
+            </span>
+          </h3>
+          <p>按需开启。开启后，登录及安全验证还需输入验证器生成的动态码。</p>
+        </div>
+        <button
+          onClick={() => {
+            close();
+            setMessage("");
+            setMode(me.totp_enabled ? "disable" : "enable");
+          }}
+        >
+          {me.totp_enabled ? "关闭双因素认证" : "开启双因素认证"}
+        </button>
+      </div>
+      {mode && (
+        <Modal
+          title={mode === "disable" ? "关闭双因素认证" : "开启双因素认证"}
+          close={close}
+        >
+          <form onSubmit={submit}>
+            {!enrollment && (
+              <label>
+                当前密码
+                <input
+                  required
+                  type="password"
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+              </label>
+            )}
+            {enrollment && (
+              <>
+                <p>
+                  使用验证器扫描二维码，或手动输入绑定密钥，然后输入生成的动态码。绑定在十分钟后过期。
+                </p>
+                <img className="totp-qr" src={qr} alt="验证器绑定二维码" />
+                <label>
+                  绑定密钥
+                  <input readOnly value={enrollment.secret} />
+                </label>
+              </>
+            )}
+            {(mode === "disable" || enrollment) && (
+              <label>
+                动态验证码
+                <input
+                  required
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  pattern="[0-9]{6}"
+                  maxLength={6}
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                />
+              </label>
+            )}
+            {error && (
+              <p className="error" role="alert">
+                {error}
+              </p>
+            )}
+            <button className="primary" disabled={busy}>
+              {mode === "disable"
+                ? "确认关闭"
+                : enrollment
+                  ? "验证并开启"
+                  : "下一步"}
+            </button>
+          </form>
+        </Modal>
+      )}
+    </section>
+  );
+}
+
 function Modal({
   title,
   close,
