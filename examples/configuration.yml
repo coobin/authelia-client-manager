@@ -1,0 +1,17 @@
+# Fictional demonstration. This file is not a production Authelia configuration.
+server:
+  address: tcp://0.0.0.0:9091/
+identity_providers:
+  oidc:
+    clients:
+      - client_id: example-expenses
+        client_name: 费用申请演示
+        public: true
+        authorization_policy: one_factor
+        require_pkce: true
+        pkce_challenge_method: S256
+        redirect_uris: [https://expenses.example.com/auth/callback]
+        scopes: [openid, profile, email]
+        grant_types: [authorization_code]
+        response_types: [code]
+        token_endpoint_auth_method: none

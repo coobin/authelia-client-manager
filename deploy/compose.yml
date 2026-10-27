@@ -1,0 +1,55 @@
+name: authelia-client-manager
+services:
+  web:
+    image: ${ACM_IMAGE:-authelia-client-manager:0.1.0}
+    user: ${ACM_UID:-10001}:${ACM_GID:-10001}
+    restart: unless-stopped
+    ports:
+      - "${ACM_BIND:-127.0.0.1}:8098:8098"
+    environment:
+      ACM_DATA: /data
+      ACM_AGENT_SOCKET: /run/acm/agent.sock
+      ACM_ORIGIN: ${ACM_ORIGIN:-https://manager.example.com}
+      ACM_SECURE_COOKIE: ${ACM_SECURE_COOKIE:-1}
+    volumes:
+      - ${ACM_WEB_DATA:?set private web data directory}:/data
+      - ${ACM_SOCKET_DIR:?set private socket directory}:/run/acm:ro
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8098/api/health')"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options: {max-size: 5m, max-file: "2"}
+  agent:
+    image: ${ACM_IMAGE:-authelia-client-manager:0.1.0}
+    user: "0:0"
+    group_add: ["${ACM_DOCKER_GID:?set Docker socket group}", "${ACM_GID:-10001}"]
+    restart: unless-stopped
+    network_mode: none
+    environment:
+      ACM_ROLE: agent
+      ACM_AGENT_SOCKET: /run/acm/agent.sock
+      ACM_CONFIG: /provider/configuration.yml
+      ACM_INSIDE_CONFIG: ${ACM_INSIDE_CONFIG:-/config/configuration.yml}
+      ACM_AGENT_STATE: /state
+      ACM_WRITABLE: ${ACM_WRITABLE:-0}
+      ACM_TARGET: ${ACM_TARGET:?set target container}
+      ACM_ISSUER: ${ACM_ISSUER:?set provider issuer}
+    volumes:
+      - ${ACM_PROVIDER_DIR:?set private provider directory}:/provider
+      - ${ACM_AGENT_DATA:?set private agent state directory}:/state
+      - ${ACM_SOCKET_DIR}:/run/acm
+      - /var/run/docker.sock:/var/run/docker.sock
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    logging:
+      driver: json-file
+      options: {max-size: 5m, max-file: "2"}

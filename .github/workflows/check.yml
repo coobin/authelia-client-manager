@@ -1,0 +1,31 @@
+name: Checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: pip install -r requirements.lock && pip install -e . --no-deps pytest pytest-asyncio
+      - run: pytest -q
+      - run: python scripts/privacy_check.py
+      - uses: actions/setup-node@v4
+        with: {node-version: '22', cache: npm, cache-dependency-path: frontend/package-lock.json}
+      - run: npm ci --prefix frontend && npm run build --prefix frontend
+      - run: docker build -t acm-ci .
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - run: |
+          docker pull authelia/authelia:4.39.1
+          mkdir -p "$RUNNER_TEMP/acm-fixture"
+          docker run --rm -i --user 0 --entrypoint python \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$RUNNER_TEMP/acm-fixture:/fixture" \
+            -e ACM_TEST_HOST_ROOT="$RUNNER_TEMP/acm-fixture" \
+            -e ACM_TEST_IMAGE=authelia/authelia:4.39.1 \
+            acm-ci - < scripts/integration.py

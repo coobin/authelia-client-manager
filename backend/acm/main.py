@@ -1,0 +1,387 @@
+import hashlib
+import json
+import os
+import secrets
+from pathlib import Path
+from uuid import uuid4
+from urllib.parse import urlsplit
+import httpx
+import pyotp
+from argon2 import PasswordHasher
+from fastapi import FastAPI, Request, HTTPException, Depends
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field, ConfigDict
+from .common import now, secret_pair, digest
+from .storage import Storage
+from .models import DraftInput, AgentChange
+
+
+class Login(BaseModel):
+    username: str = Field(min_length=1, max_length=100)
+    password: str = Field(min_length=1, max_length=200)
+    code: str = Field(pattern=r"^\d{6}$")
+
+
+class Reauth(BaseModel):
+    password: str = Field(min_length=1, max_length=200)
+    code: str = Field(pattern=r"^\d{6}$")
+
+
+class Deploy(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    draft_id: str = Field(pattern=r"^[a-f0-9]{32}$")
+    acknowledge_restart: bool
+
+
+class Agent:
+    def __init__(self, socket):
+        self.socket = socket
+
+    def call(self, method, path, data=None):
+        try:
+            with httpx.Client(
+                transport=httpx.HTTPTransport(uds=self.socket),
+                base_url="http://agent",
+                timeout=120,
+                trust_env=False,
+            ) as c:
+                r = c.request(method, path, json=data)
+            if r.status_code >= 400:
+                raise HTTPException(
+                    r.status_code, r.json().get("detail", "代理拒绝操作")
+                )
+            return r.json()
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(503, "发布代理暂不可用，请检查部署状态")
+
+
+def create_app(storage=None, agent=None, *, origin=None, secure=None, static=None):
+    data = Path(os.getenv("ACM_DATA", "runtime/web"))
+    s = storage or Storage(data / "web.sqlite", data / "master.key")
+    a = agent or Agent(os.getenv("ACM_AGENT_SOCKET", "runtime/agent.sock"))
+    origin = origin or os.getenv("ACM_ORIGIN", "http://localhost:8098")
+    secure = (
+        secure if secure is not None else os.getenv("ACM_SECURE_COOKIE", "1") == "1"
+    )
+    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    app.state.storage = s
+    app.state.agent = a
+
+    @app.exception_handler(RequestValidationError)
+    async def invalid(req, exc):
+        # Pydantic's input/context fields can contain passwords. Never return them.
+        return JSONResponse(
+            {
+                "detail": "输入格式不正确，请检查必填字段、地址及认证代码",
+                "fields": [".".join(str(x) for x in e["loc"]) for e in exc.errors()],
+            },
+            status_code=422,
+        )
+
+    @app.middleware("http")
+    async def security(req, call_next):
+        if (
+            req.headers.get("content-length", "").isdigit()
+            and int(req.headers["content-length"]) > 65536
+        ):
+            return JSONResponse({"detail": "请求过大"}, 413)
+        if (
+            req.method not in ("GET", "HEAD", "OPTIONS")
+            and req.headers.get("origin") != origin
+        ):
+            return JSONResponse({"detail": "请求来源不匹配"}, 403)
+        r = await call_next(req)
+        for k, v in {
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+            "X-Frame-Options": "DENY",
+            "Referrer-Policy": "no-referrer",
+            "Content-Security-Policy": "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+        }.items():
+            r.headers[k] = v
+        return r
+
+    def current(req: Request):
+        token = req.cookies.get("acm_session", "")
+        key = digest(token.encode())
+        with s.connect() as c:
+            row = c.execute(
+                "SELECT sessions.*,admins.role FROM sessions JOIN admins ON admins.username=sessions.username WHERE sessions.id=?",
+                (key,),
+            ).fetchone()
+            if not row or row["created"] < now() - 28800 or row["seen"] < now() - 1800:
+                raise HTTPException(401, "请登录")
+            if req.method not in ("GET", "HEAD") and not secrets.compare_digest(
+                req.headers.get("x-csrf-token", ""), row["csrf"]
+            ):
+                raise HTTPException(403, "请求校验失败，请刷新页面")
+            c.execute("UPDATE sessions SET seen=? WHERE id=?", (now(), key))
+        return dict(row)
+
+    def admin(u=Depends(current)):
+        if u["role"] != "admin":
+            raise HTTPException(403, "需要管理员权限")
+        return u
+
+    def fresh(u=Depends(admin)):
+        if u["reauth"] < now() - 300:
+            raise HTTPException(403, "请先完成近期安全验证")
+        return u
+
+    def verify(username, password, code):
+        with s.connect() as c:
+            r = c.execute(
+                "SELECT * FROM admins WHERE username=?", (username,)
+            ).fetchone()
+        ok = False
+        try:
+            if r:
+                ok = PasswordHasher().verify(r["password"], password) and pyotp.TOTP(
+                    s.decrypt(r["totp"], "totp:" + username)
+                ).verify(code, valid_window=1)
+            else:
+                PasswordHasher().verify(
+                    "$argon2id$v=19$m=65536,t=3,p=4$YWFhYWFhYWFhYWFhYWFhYQ$5YnZTkJy8I8n2QWbLa8SY4p8GkgpXvJjX4jC9m4vWJE",
+                    password,
+                )
+        except Exception:
+            pass
+        if not ok:
+            raise HTTPException(401, "账号、密码或动态验证码不正确")
+
+    @app.get("/api/health")
+    def health():
+        return {"status": "ok", "version": "0.1.0"}
+
+    @app.post("/api/login")
+    def login(body: Login, req: Request):
+        ip = req.client.host if req.client else "local"
+        if not s.limit("login:" + ip, maximum=12):
+            raise HTTPException(429, "尝试次数较多，请稍后再试")
+        verify(body.username, body.password, body.code)
+        s.cleanup()
+        token = secrets.token_urlsafe(32)
+        csrf = secrets.token_urlsafe(24)
+        with s.connect() as c:
+            c.execute(
+                "INSERT INTO sessions VALUES(?,?,?,?,?,?)",
+                (digest(token.encode()), body.username, csrf, now(), now(), now()),
+            )
+        s.audit(body.username, "login")
+        r = JSONResponse({"username": body.username, "csrf": csrf})
+        r.set_cookie(
+            "acm_session",
+            token,
+            httponly=True,
+            secure=secure,
+            samesite="strict",
+            max_age=28800,
+            path="/",
+        )
+        return r
+
+    @app.get("/api/me")
+    def me(u=Depends(current)):
+        return {k: u[k] for k in ("username", "role", "csrf", "reauth")}
+
+    @app.post("/api/logout")
+    def logout(u=Depends(current)):
+        with s.connect() as c:
+            c.execute("DELETE FROM sessions WHERE id=?", (u["id"],))
+        r = JSONResponse({"ok": True})
+        r.delete_cookie("acm_session")
+        return r
+
+    @app.post("/api/reauth")
+    def reauth(body: Reauth, u=Depends(admin)):
+        if not s.limit("reauth:" + u["username"]):
+            raise HTTPException(429, "请稍后再试")
+        verify(u["username"], body.password, body.code)
+        with s.connect() as c:
+            c.execute("UPDATE sessions SET reauth=? WHERE id=?", (now(), u["id"]))
+        return {"ok": True}
+
+    @app.get("/api/clients")
+    def clients(u=Depends(current)):
+        inv = a.call("GET", "/inventory")
+        with s.connect() as c:
+            meta = {
+                r["client_id"]: dict(r) for r in c.execute("SELECT * FROM metadata")
+            }
+        for x in inv["clients"]:
+            x.update(
+                meta.get(x["client_id"], {"owner": "", "environment": "unclassified"})
+            )
+        return inv
+
+    @app.get("/api/drafts")
+    def drafts(u=Depends(current)):
+        with s.connect() as c:
+            rows = c.execute(
+                "SELECT id,payload,owner,environment,created,validated,used FROM drafts ORDER BY created DESC LIMIT 100"
+            ).fetchall()
+        out = []
+        for row in rows:
+            x = dict(row)
+            p = json.loads(x.pop("payload"))
+            x.update(
+                {
+                    "client_id": p["client"]["client_id"],
+                    "client_name": p["client"]["client_name"],
+                    "operation": p["operation"],
+                }
+            )
+            out.append(x)
+        return out
+
+    @app.post("/api/drafts")
+    def draft(body: DraftInput, u=Depends(admin)):
+        inv = a.call("GET", "/inventory")
+        if inv["revision"] != body.revision:
+            raise HTTPException(409, "配置已变化，请刷新")
+        existing = next(
+            (x for x in inv["clients"] if x["client_id"] == body.client.client_id), None
+        )
+        if existing and not existing["editable"]:
+            raise HTTPException(409, "该客户端使用高级配置，当前只读")
+        if body.operation == "rotate" and not existing:
+            raise HTTPException(409, "客户端不存在")
+        jid = uuid4().hex
+        plain = secret_hash = None
+        if (
+            not body.client.public
+            and body.operation not in ("disable", "restore")
+            and (existing is None or body.operation == "rotate")
+        ):
+            plain, secret_hash = secret_pair()
+        ch = AgentChange(
+            id=jid,
+            operation=body.operation,
+            client=body.client,
+            revision=body.revision,
+            secret_hash=secret_hash,
+            restore_id=body.restore_id,
+        )
+        delivery = uuid4().hex if plain else None
+        with s.connect() as c:
+            c.execute(
+                "INSERT INTO drafts(id,payload,owner,environment,created,validated) VALUES(?,?,?,?,?,0)",
+                (jid, ch.model_dump_json(), body.owner, body.environment, now()),
+            )
+            if plain:
+                c.execute(
+                    "INSERT INTO deliveries VALUES(?,?,?,?,0)",
+                    (
+                        delivery,
+                        jid,
+                        s.encrypt(plain, "delivery:" + delivery),
+                        now() + 86400,
+                    ),
+                )
+        s.audit(u["username"], "draft-created", body.client.client_id)
+        return {
+            "id": jid,
+            "delivery_id": delivery,
+            "secret_expires_in": 86400 if plain else None,
+        }
+
+    @app.post("/api/drafts/{jid}/validate")
+    def validate(jid: str, u=Depends(admin)):
+        with s.connect() as c:
+            r = c.execute("SELECT * FROM drafts WHERE id=?", (jid,)).fetchone()
+        if not r:
+            raise HTTPException(404, "草稿不存在")
+        result = a.call("POST", "/validate", json.loads(r["payload"]))
+        with s.connect() as c:
+            c.execute("UPDATE drafts SET validated=1 WHERE id=?", (jid,))
+        return result
+
+    @app.post("/api/deployments")
+    def deploy(body: Deploy, u=Depends(fresh)):
+        if not body.acknowledge_restart:
+            raise HTTPException(400, "请确认重启影响")
+        with s.connect() as c:
+            r = c.execute(
+                "SELECT * FROM drafts WHERE id=?", (body.draft_id,)
+            ).fetchone()
+        if not r or not r["validated"]:
+            raise HTTPException(409, "请先校验草稿")
+        result = a.call("POST", "/deploy", json.loads(r["payload"]))
+        with s.connect() as c:
+            c.execute("UPDATE drafts SET used=1 WHERE id=?", (body.draft_id,))
+        s.audit(u["username"], "deployment-requested", body.draft_id)
+        return result
+
+    @app.get("/api/deployments")
+    def deployments(u=Depends(current)):
+        jobs = a.call("GET", "/jobs")
+        for j in jobs:
+            if j["state"] == "applied" and j["operation"] in ("upsert", "restore"):
+                with s.connect() as c:
+                    d = c.execute(
+                        "SELECT * FROM drafts WHERE id=?", (j["id"],)
+                    ).fetchone()
+                    if d:
+                        c.execute(
+                            "INSERT OR REPLACE INTO metadata VALUES(?,?,?)",
+                            (j["client_id"], d["owner"], d["environment"]),
+                        )
+        return jobs
+
+    @app.post("/api/deployments/{jid}/rollback")
+    def rollback(jid: str, u=Depends(fresh)):
+        result = a.call("POST", "/rollback", {"id": jid, "new_id": uuid4().hex})
+        s.audit(u["username"], "rollback-requested", jid)
+        return result
+
+    @app.get("/api/deliveries")
+    def deliveries(u=Depends(admin)):
+        s.cleanup()
+        with s.connect() as c:
+            return [
+                dict(r)
+                for r in c.execute(
+                    "SELECT id,draft_id,expires FROM deliveries WHERE claimed=0 ORDER BY expires"
+                )
+            ]
+
+    @app.post("/api/deliveries/{did}/claim")
+    def claim(did: str, u=Depends(fresh)):
+        jobs = a.call("GET", "/jobs")
+        with s.connect() as c:
+            c.execute("BEGIN IMMEDIATE")
+            r = c.execute("SELECT * FROM deliveries WHERE id=?", (did,)).fetchone()
+            if not r or r["claimed"] or r["expires"] < now():
+                raise HTTPException(410, "密钥已领取或已过期")
+            if not any(
+                j["id"] == r["draft_id"] and j["state"] == "applied" for j in jobs
+            ):
+                raise HTTPException(409, "发布成功后才能领取密钥")
+            plain = s.decrypt(r["secret"], "delivery:" + did)
+            c.execute("DELETE FROM deliveries WHERE id=?", (did,))
+        s.audit(u["username"], "secret-claimed", did)
+        return {"secret": plain}
+
+    @app.get("/api/audit")
+    def audit(u=Depends(current)):
+        with s.connect() as c:
+            return [
+                dict(r)
+                for r in c.execute("SELECT * FROM audit ORDER BY id DESC LIMIT 200")
+            ]
+
+    static = Path(static or os.getenv("ACM_STATIC", "frontend/dist"))
+    if (static / "assets").is_dir():
+        app.mount("/assets", StaticFiles(directory=static / "assets"), name="assets")
+
+    @app.get("/")
+    def index():
+        if (static / "index.html").exists():
+            return FileResponse(static / "index.html")
+        raise HTTPException(503, "请先构建前端资源")
+
+    return app
