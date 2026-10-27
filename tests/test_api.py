@@ -229,11 +229,19 @@ def test_setup_password_confirmation_and_strength(system):
     assert (
         c.post(
             "/api/setup",
-            json={"username": "abc", "password": "short", "confirm_password": "short"},
+            json={"username": "abc", "password": "1234567", "confirm_password": "1234567"},
         ).status_code
         == 422
     )
     assert c.get("/api/auth/status").json()["setup_required"]
+    assert (
+        c.post(
+            "/api/setup",
+            json={"username": "abc", "password": "12345678", "confirm_password": "12345678"},
+        ).status_code
+        == 200
+    )
+    assert not c.get("/api/auth/status").json()["setup_required"]
 
 
 def test_setup_rejects_cross_origin(system):
@@ -401,6 +409,27 @@ def test_legacy_totp_is_preserved_until_explicitly_changed(tmp_path):
     with s.connect() as c:
         row = c.execute("SELECT * FROM admins").fetchone()
         assert row["totp_enabled"] == 1 and row["needs_setup"] == 0
+
+
+def test_cli_password_length(tmp_path, monkeypatch):
+    import sys
+    from acm.cli import main
+    from acm.storage import open_storage
+
+    data_dir = str(tmp_path / "cli_data")
+    open_storage(data_dir)
+
+    monkeypatch.setattr(sys, "argv", ["acm.cli", "create-admin", "--data", data_dir, "--username", "admin1"])
+    monkeypatch.setattr("getpass.getpass", lambda prompt: "1234567")
+    import pytest
+    with pytest.raises(SystemExit) as exc:
+        main()
+    assert "Password must contain at least 8 characters" in str(exc.value)
+
+    monkeypatch.setattr(sys, "argv", ["acm.cli", "create-admin", "--data", data_dir, "--username", "admin2"])
+    monkeypatch.setattr("getpass.getpass", lambda prompt: "12345678")
+    main()
+
 
 
 def test_missing_master_key_never_silently_replaced(tmp_path):

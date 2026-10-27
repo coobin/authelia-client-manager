@@ -53,10 +53,10 @@ def main():
     password = (
         secrets.token_urlsafe(24)
         if a.bundle
-        else getpass.getpass("New password (minimum 12 characters): ")
+        else getpass.getpass("New password (minimum 8 characters): ")
     )
-    if len(password) < 12:
-        raise SystemExit("Password must contain at least 12 characters")
+    if len(password) < 8:
+        raise SystemExit("Password must contain at least 8 characters")
     seed = pyotp.random_base32() if a.enable_totp else None
     with s.connect() as c:
         exists = c.execute(

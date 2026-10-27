@@ -32,8 +32,8 @@ class Reauth(BaseModel):
 class Setup(BaseModel):
     model_config = ConfigDict(extra="forbid")
     username: str = Field(min_length=3, max_length=64, pattern=r"^[^\s\x00-\x1f]+$")
-    password: str = Field(min_length=12, max_length=200)
-    confirm_password: str = Field(min_length=12, max_length=200)
+    password: str = Field(min_length=8, max_length=200)
+    confirm_password: str = Field(min_length=8, max_length=200)
 
 
 class TotpConfirmation(BaseModel):

@@ -351,12 +351,12 @@ function App() {
               required
               type="password"
               autoComplete={setupRequired ? "new-password" : "current-password"}
-              minLength={setupRequired ? 12 : 1}
+              minLength={setupRequired ? 8 : 1}
               maxLength={200}
               value={login.password}
               onChange={(e) => setLogin({ ...login, password: e.target.value })}
             />
-            {setupRequired && <small>至少 12 个字符。</small>}
+            {setupRequired && <small>至少 8 个字符。</small>}
           </label>
           {setupRequired && (
             <label>
@@ -365,7 +365,7 @@ function App() {
                 required
                 type="password"
                 autoComplete="new-password"
-                minLength={12}
+                minLength={8}
                 maxLength={200}
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
