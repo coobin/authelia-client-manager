@@ -15,6 +15,8 @@ import {
   Layers,
   History,
   LockKeyhole,
+  Link,
+  AlertCircle,
 } from "lucide-react";
 import "./style.css";
 import QRCode from "qrcode";
@@ -118,7 +120,256 @@ async function copyText(value: string) {
   }
 }
 
+function getInitialClaimId(): string {
+  const pathMatch = window.location.pathname.match(/^\/claim\/([a-f0-9]{32})$/i);
+  if (pathMatch) return pathMatch[1];
+  const param = new URLSearchParams(window.location.search).get("claim");
+  if (param && /^[a-f0-9]{32}$/i.test(param)) return param;
+  return "";
+}
+
+function ClaimPortal({
+  claimId,
+  onExit,
+}: {
+  claimId: string;
+  onExit: () => void;
+}) {
+  const [loading, setLoading] = useState(true);
+  const [claiming, setClaiming] = useState(false);
+  const [info, setInfo] = useState<{
+    id: string;
+    client_id: string;
+    client_name: string;
+    expires: number;
+    ready: boolean;
+  } | null>(null);
+  const [secret, setSecret] = useState("");
+  const [error, setError] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  async function fetchInfo() {
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetch("/api/claim/" + claimId);
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || "该领取链接不存在或已失效");
+      }
+      setInfo(data);
+    } catch (e: any) {
+      setError(e.message || "获取密钥信息失败");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    fetchInfo();
+  }, [claimId]);
+
+  async function handleClaim() {
+    setClaiming(true);
+    setError("");
+    try {
+      const res = await fetch("/api/claim/" + claimId, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || "领取失败");
+      }
+      setSecret(data.secret);
+      if (data.client_id && info) {
+        setInfo({
+          ...info,
+          client_id: data.client_id,
+          client_name: data.client_name,
+        });
+      }
+    } catch (e: any) {
+      setError(e.message || "领取失败");
+    } finally {
+      setClaiming(false);
+    }
+  }
+
+  async function copySecret() {
+    if (!secret) return;
+    await copyText(secret);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 3000);
+  }
+
+  return (
+    <div className="claim-container">
+      <div className="claim-card">
+        {loading ? (
+          <div style={{ textAlign: "center", padding: "40px 0" }}>
+            <div className="claim-icon-wrapper">
+              <RefreshCw size={28} />
+            </div>
+            <h2>正在获取密钥信息…</h2>
+            <p style={{ color: "#6b7e90" }}>安全凭证校验中，请稍候</p>
+          </div>
+        ) : error ? (
+          <div>
+            <div className="claim-header">
+              <div className="claim-icon-wrapper error">
+                <AlertCircle size={32} />
+              </div>
+              <h1>领取链接已失效</h1>
+              <p>{error}</p>
+            </div>
+            <div className="claim-warning">
+              此链接为一次性安全凭证，若已被领取或超过 24 小时有效期即自动失效作废。如需使用新密钥，请联系系统管理员重新生成。
+            </div>
+            <div className="claim-footer-nav">
+              <button type="button" onClick={onExit}>
+                前往管理员登录
+              </button>
+            </div>
+          </div>
+        ) : secret ? (
+          <div>
+            <div className="claim-header">
+              <div className="claim-icon-wrapper success">
+                <Check size={32} />
+              </div>
+              <h1>应用密钥领取成功</h1>
+              <p>请立即妥善保存该密钥，关闭或刷新页面后将无法再次查看。</p>
+            </div>
+            {info && (
+              <div className="claim-meta-box">
+                <div className="claim-meta-row">
+                  <span className="claim-meta-label">应用名称</span>
+                  <span className="claim-meta-value">
+                    {info.client_name || "未命名应用"}
+                  </span>
+                </div>
+                <div className="claim-meta-row">
+                  <span className="claim-meta-label">客户端 ID</span>
+                  <span className="claim-meta-value">{info.client_id}</span>
+                </div>
+              </div>
+            )}
+            <div className="claim-secret-box">
+              <p className="claim-secret-text">{secret}</p>
+            </div>
+            <button
+              type="button"
+              className="primary claim-btn-large"
+              onClick={copySecret}
+            >
+              {copied ? (
+                <>
+                  <Check size={18} /> 已复制到剪贴板
+                </>
+              ) : (
+                <>
+                  <Copy size={18} /> 复制客户端密钥 (Client Secret)
+                </>
+              )}
+            </button>
+            <div className="claim-warning">
+              <strong>重要提示：</strong>此密钥由系统加密存储且仅单次交付，本次展示完毕后已从交付通道彻底销毁。请务必及时保存到配置文件或安全密码库中。
+            </div>
+            <div className="claim-footer-nav">
+              <button type="button" onClick={onExit}>
+                前往管理控制台
+              </button>
+            </div>
+          </div>
+        ) : info && !info.ready ? (
+          <div>
+            <div className="claim-header">
+              <div className="claim-icon-wrapper waiting">
+                <RefreshCw size={32} />
+              </div>
+              <h1>应用配置发布中</h1>
+              <p>管理员已生成密钥，待认证服务生效完成后即可领取。</p>
+            </div>
+            <div className="claim-meta-box">
+              <div className="claim-meta-row">
+                <span className="claim-meta-label">应用名称</span>
+                <span className="claim-meta-value">
+                  {info.client_name || "未命名应用"}
+                </span>
+              </div>
+              <div className="claim-meta-row">
+                <span className="claim-meta-label">客户端 ID</span>
+                <span className="claim-meta-value">{info.client_id}</span>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="primary claim-btn-large"
+              onClick={fetchInfo}
+            >
+              <RefreshCw size={18} /> 刷新检查状态
+            </button>
+            <div className="claim-footer-nav">
+              <button type="button" onClick={onExit}>
+                前往管理员登录
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div>
+            <div className="claim-header">
+              <div className="claim-icon-wrapper">
+                <LockKeyhole size={32} />
+              </div>
+              <h1>领取应用密钥</h1>
+              <p>您正在领取应用接入的 Client Secret 密钥凭证。</p>
+            </div>
+            {info && (
+              <div className="claim-meta-box">
+                <div className="claim-meta-row">
+                  <span className="claim-meta-label">应用名称</span>
+                  <span className="claim-meta-value">
+                    {info.client_name || "未命名应用"}
+                  </span>
+                </div>
+                <div className="claim-meta-row">
+                  <span className="claim-meta-label">客户端 ID</span>
+                  <span className="claim-meta-value">{info.client_id}</span>
+                </div>
+                <div className="claim-meta-row">
+                  <span className="claim-meta-label">有效期至</span>
+                  <span className="claim-meta-value">
+                    {new Date(info.expires * 1000).toLocaleString()}
+                  </span>
+                </div>
+              </div>
+            )}
+            <div className="claim-warning">
+              <strong>单次有效：</strong>点击“立即领取密钥”后将立即解密展示密钥，同时该领取链接将永久失效，无法再次打开。
+            </div>
+            <button
+              type="button"
+              className="primary claim-btn-large"
+              disabled={claiming}
+              onClick={handleClaim}
+            >
+              {claiming ? "正在安全解密中…" : "立即领取密钥"}
+            </button>
+            <div className="claim-footer-nav">
+              <button type="button" onClick={onExit}>
+                前往管理员登录
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function App() {
+  const [claimId, setClaimId] = useState(getInitialClaimId);
   const [me, setMe] = useState<any>(null),
     [loaded, setLoaded] = useState(false),
     [error, setError] = useState(""),
@@ -278,6 +529,16 @@ function App() {
       `应用：${c.client_name}\nIssuer：${inv?.issuer}\n自动发现：${inv?.issuer}/.well-known/openid-configuration\nClient ID：${c.client_id}\n登录流程：Authorization Code\nPKCE：${c.require_pkce === false ? "未强制" : "S256"}\nScope：${c.scopes.join(" ")}\n客户端认证：${c.token_endpoint_auth_method || (c.public ? "none" : "client_secret_basic")}\n回调地址：\n${c.redirect_uris.join("\n")}\n\n${c.public ? "公共客户端，无客户端密钥" : "Client Secret 通过单独的安全渠道交付"}`,
     );
   }
+  if (claimId)
+    return (
+      <ClaimPortal
+        claimId={claimId}
+        onExit={() => {
+          setClaimId("");
+          window.history.pushState(null, "", "/");
+        }}
+      />
+    );
   if (!loaded) return <div className="loading">正在打开管理工具…</div>;
   if (!me)
     return (
@@ -761,30 +1022,66 @@ function App() {
               <section className="deliveries">
                 <h2>待领取密钥</h2>
                 <p>
-                  仅发布成功后可以领取；领取后无法再次显示，请及时安全保存。
+                  可生成单次领取链接直接发给对接人；也可由管理员在此直接安全领取。
                 </p>
-                {deliveries.map((d) => (
-                  <div key={d.id}>
-                    <span>
-                      关联发布 {d.draft_id.slice(0, 8)} ·{" "}
-                      {new Date(d.expires * 1000).toLocaleString()} 到期
-                    </span>
-                    <button
-                      onClick={() =>
-                        run(async () => {
-                          setSecret(
-                            (await api("/deliveries/" + d.id + "/claim", {}))
-                              .secret,
-                          );
-                          await refresh();
-                        })
-                      }
-                    >
-                      <LockKeyhole size={16} />
-                      领取密钥
-                    </button>
-                  </div>
-                ))}
+                {deliveries.map((d) => {
+                  const claimUrl = `${window.location.origin}/claim/${d.id}`;
+                  return (
+                    <div key={d.id} className="delivery-row">
+                      <div className="delivery-meta">
+                        <div className="delivery-title">
+                          <strong>
+                            {d.client_name || d.client_id || "未命名应用"}
+                          </strong>
+                          {d.client_id && (
+                            <span className="mono">({d.client_id})</span>
+                          )}
+                          {d.ready ? (
+                            <span className="tag success">可领取</span>
+                          ) : (
+                            <span className="tag">发布中</span>
+                          )}
+                        </div>
+                        <small>
+                          关联发布 {d.draft_id.slice(0, 8)} ·{" "}
+                          {new Date(d.expires * 1000).toLocaleString()} 到期
+                        </small>
+                      </div>
+                      <div className="delivery-actions">
+                        <button
+                          type="button"
+                          className="primary"
+                          onClick={() =>
+                            run(async () => {
+                              await copyText(claimUrl);
+                              setNotice(
+                                "领取链接已复制！可直接发送给对接人（一次性有效，领取后即失效）",
+                              );
+                            })
+                          }
+                        >
+                          <Link size={16} />
+                          复制领取链接
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            run(async () => {
+                              setSecret(
+                                (await api("/deliveries/" + d.id + "/claim", {}))
+                                  .secret,
+                              );
+                              await refresh();
+                            })
+                          }
+                        >
+                          <LockKeyhole size={16} />
+                          直接领取
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
               </section>
             )}
           </>

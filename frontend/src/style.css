@@ -833,3 +833,177 @@ dd {
   height: 1px;
   opacity: 0;
 }
+
+/* 单次密钥领取页面样式 */
+.claim-container {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: #f0f4f9;
+}
+.claim-card {
+  width: 100%;
+  max-width: 520px;
+  background: #fff;
+  border: 1px solid #dce4ed;
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(15, 35, 60, 0.08);
+  padding: 36px 32px;
+}
+.claim-header {
+  text-align: center;
+  margin-bottom: 24px;
+}
+.claim-icon-wrapper {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: #eef4fc;
+  color: #2159b8;
+  margin-bottom: 16px;
+}
+.claim-icon-wrapper.success {
+  background: #e4f4ef;
+  color: #237157;
+}
+.claim-icon-wrapper.error {
+  background: #fdeeee;
+  color: #c93b3b;
+}
+.claim-icon-wrapper.waiting {
+  background: #fdf5e6;
+  color: #c7831d;
+}
+.claim-header h1 {
+  font-size: 22px;
+  font-weight: 650;
+  margin-bottom: 8px;
+}
+.claim-header p {
+  color: #6b7e90;
+  font-size: 13px;
+  margin-bottom: 0;
+  line-height: 1.5;
+}
+.claim-meta-box {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 16px;
+  margin: 20px 0;
+  font-size: 13px;
+}
+.claim-meta-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.claim-meta-row:last-child {
+  margin-bottom: 0;
+}
+.claim-meta-label {
+  color: #64748b;
+}
+.claim-meta-value {
+  font-weight: 600;
+  color: #1e293b;
+  font-family: ui-monospace, monospace;
+}
+.claim-secret-box {
+  background: #0f172a;
+  border-radius: 8px;
+  padding: 16px;
+  margin: 20px 0;
+}
+.claim-secret-text {
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+  word-break: break-all;
+  color: #38bdf8;
+  line-height: 1.6;
+  user-select: all;
+  margin: 0;
+}
+.claim-warning {
+  background: #fff8eb;
+  border: 1px solid #f9e2b2;
+  border-radius: 8px;
+  padding: 12px 14px;
+  color: #92580a;
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 16px 0;
+}
+.claim-btn-large {
+  width: 100%;
+  padding: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 8px;
+  margin-top: 8px;
+}
+.claim-footer-nav {
+  text-align: center;
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid #edf2f7;
+}
+.claim-footer-nav button {
+  color: #64748b;
+  font-size: 12px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+.claim-footer-nav button:hover {
+  color: #1e293b;
+  text-decoration: underline;
+}
+
+/* 待领取密钥列表增强 */
+.delivery-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 0;
+  border-bottom: 1px solid #dce4ed;
+  gap: 15px;
+}
+.delivery-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+.delivery-title .mono {
+  font-family: ui-monospace, monospace;
+  color: #64748b;
+  font-size: 12px;
+}
+.delivery-meta small {
+  color: #6b7e90;
+  font-size: 12px;
+}
+.delivery-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+@media (max-width: 680px) {
+  .delivery-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .delivery-actions {
+    width: 100%;
+    margin-top: 8px;
+  }
+}

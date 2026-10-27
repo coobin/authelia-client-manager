@@ -431,6 +431,69 @@ def test_cli_password_length(tmp_path, monkeypatch):
     main()
 
 
+def test_public_claim_link_flow(system):
+    c = login(system)
+    from fastapi.testclient import TestClient
+
+    # 无认证状态的匿名客户端
+    anon = TestClient(c.app)
+    anon.headers["Origin"] = "http://testserver"
+
+    inv = c.get("/api/clients").json()
+    payload = {
+        "operation": "upsert",
+        "owner": "dev@example.com",
+        "environment": "production",
+        "revision": inv["revision"],
+        "client": {
+            "client_id": "public-link-app",
+            "client_name": "Link Claim App",
+            "redirect_uris": ["https://app.example.com/callback"],
+            "scopes": ["openid", "profile"],
+            "authorization_policy": "one_factor",
+        },
+    }
+    r = c.post("/api/drafts", json=payload).json()
+    did = r["delivery_id"]
+
+    # 未部署前查询和领取
+    info = anon.get(f"/api/claim/{did}").json()
+    assert info["ready"] is False
+    assert info["client_id"] == "public-link-app"
+    assert anon.post(f"/api/claim/{did}").status_code == 409
+
+    # 管理员查看 deliveries 列表，应包含客户端名称和 ready=False
+    delivs = c.get("/api/deliveries").json()
+    item = next(d for d in delivs if d["id"] == did)
+    assert item["client_name"] == "Link Claim App"
+    assert item["ready"] is False
+
+    # 管理员发布
+    c.post(f"/api/drafts/{r['id']}/validate", json={})
+    c.post("/api/deployments", json={"draft_id": r["id"], "acknowledge_restart": True})
+    wait(system[2])
+
+    # 部署完成后查询
+    info = anon.get(f"/api/claim/{did}").json()
+    assert info["ready"] is True
+
+    # 匿名单次领取
+    claim_res = anon.post(f"/api/claim/{did}")
+    assert claim_res.status_code == 200
+    data = claim_res.json()
+    assert len(data["secret"]) == 72
+    assert data["client_id"] == "public-link-app"
+
+    # 再次领取或查询即失效 (410)
+    assert anon.post(f"/api/claim/{did}").status_code == 410
+    assert anon.get(f"/api/claim/{did}").status_code == 410
+
+    # 审计日志应记录匿名链接领取
+    audit_text = c.get("/api/audit").text
+    assert "secret-claimed-via-link" in audit_text
+
+
+
 
 def test_missing_master_key_never_silently_replaced(tmp_path):
     from acm.storage import open_storage

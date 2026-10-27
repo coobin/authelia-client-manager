@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import re
 import secrets
 from pathlib import Path
 from uuid import uuid4
@@ -471,13 +472,100 @@ def create_app(storage=None, agent=None, *, origin=None, secure=None, static=Non
     @app.get("/api/deliveries")
     def deliveries(u=Depends(admin)):
         s.cleanup()
+        jobs = a.call("GET", "/jobs")
+        applied_ids = {j["id"] for j in jobs if j.get("state") == "applied"}
         with s.connect() as c:
-            return [
-                dict(r)
-                for r in c.execute(
-                    "SELECT id,draft_id,expires FROM deliveries WHERE claimed=0 ORDER BY expires"
-                )
-            ]
+            rows = c.execute(
+                "SELECT d.id, d.draft_id, d.expires, dr.payload FROM deliveries d LEFT JOIN drafts dr ON d.draft_id=dr.id WHERE d.claimed=0 ORDER BY d.expires"
+            ).fetchall()
+            res = []
+            for r in rows:
+                item = {
+                    "id": r["id"],
+                    "draft_id": r["draft_id"],
+                    "expires": r["expires"],
+                    "client_id": "",
+                    "client_name": "",
+                    "ready": r["draft_id"] in applied_ids,
+                }
+                if r["payload"]:
+                    try:
+                        p = json.loads(r["payload"])
+                        item["client_id"] = p.get("client", {}).get("client_id", "")
+                        item["client_name"] = p.get("client", {}).get("client_name", "")
+                    except Exception:
+                        pass
+                res.append(item)
+            return res
+
+    @app.get("/api/claim/{did}")
+    def claim_info(did: str, req: Request):
+        if not re.match(r"^[a-f0-9]{32}$", did):
+            raise HTTPException(404, "无效的领取凭证")
+        ip = req.client.host if req.client else "local"
+        if not s.limit("claim-info:" + ip, maximum=60):
+            raise HTTPException(429, "请求过于频繁，请稍后再试")
+        with s.connect() as c:
+            r = c.execute(
+                "SELECT d.id, d.draft_id, d.expires, d.claimed, dr.payload FROM deliveries d LEFT JOIN drafts dr ON d.draft_id=dr.id WHERE d.id=?",
+                (did,),
+            ).fetchone()
+        if not r or r["claimed"] or r["expires"] < now():
+            raise HTTPException(410, "该领取链接不存在、已失效或密钥已被领取")
+        jobs = a.call("GET", "/jobs")
+        ready = any(j["id"] == r["draft_id"] and j["state"] == "applied" for j in jobs)
+        client_id = client_name = ""
+        if r["payload"]:
+            try:
+                p = json.loads(r["payload"])
+                client_id = p.get("client", {}).get("client_id", "")
+                client_name = p.get("client", {}).get("client_name", "")
+            except Exception:
+                pass
+        return {
+            "id": did,
+            "client_id": client_id,
+            "client_name": client_name,
+            "expires": r["expires"],
+            "ready": ready,
+        }
+
+    @app.post("/api/claim/{did}")
+    def claim_public(did: str, req: Request):
+        if not re.match(r"^[a-f0-9]{32}$", did):
+            raise HTTPException(404, "无效的领取凭证")
+        ip = req.client.host if req.client else "local"
+        if not s.limit("claim-action:" + ip, maximum=20):
+            raise HTTPException(429, "请求过于频繁，请稍后再试")
+        jobs = a.call("GET", "/jobs")
+        with s.connect() as c:
+            c.execute("BEGIN IMMEDIATE")
+            r = c.execute(
+                "SELECT d.id, d.draft_id, d.secret, d.expires, d.claimed, dr.payload FROM deliveries d LEFT JOIN drafts dr ON d.draft_id=dr.id WHERE d.id=?",
+                (did,),
+            ).fetchone()
+            if not r or r["claimed"] or r["expires"] < now():
+                raise HTTPException(410, "该密钥链接已失效或已被领取")
+            if not any(
+                j["id"] == r["draft_id"] and j["state"] == "applied" for j in jobs
+            ):
+                raise HTTPException(409, "发布尚未完成，配置生效后方可领取密钥")
+            plain = s.decrypt(r["secret"], "delivery:" + did)
+            c.execute("DELETE FROM deliveries WHERE id=?", (did,))
+        s.audit("anonymous:" + ip, "secret-claimed-via-link", did)
+        client_id = client_name = ""
+        if r["payload"]:
+            try:
+                p = json.loads(r["payload"])
+                client_id = p.get("client", {}).get("client_id", "")
+                client_name = p.get("client", {}).get("client_name", "")
+            except Exception:
+                pass
+        return {
+            "secret": plain,
+            "client_id": client_id,
+            "client_name": client_name,
+        }
 
     @app.post("/api/deliveries/{did}/claim")
     def claim(did: str, u=Depends(fresh)):
@@ -507,6 +595,12 @@ def create_app(storage=None, agent=None, *, origin=None, secure=None, static=Non
     static = Path(static or os.getenv("ACM_STATIC", "frontend/dist"))
     if (static / "assets").is_dir():
         app.mount("/assets", StaticFiles(directory=static / "assets"), name="assets")
+
+    @app.get("/claim/{did}")
+    def claim_page(did: str):
+        if (static / "index.html").exists():
+            return FileResponse(static / "index.html")
+        raise HTTPException(503, "请先构建前端资源")
 
     @app.get("/")
     def index():
