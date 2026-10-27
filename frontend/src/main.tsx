@@ -87,6 +87,37 @@ async function api(path: string, body?: unknown) {
   }
   return d;
 }
+// LAN HTTP origins do not expose randomUUID or the async Clipboard API.
+function newClientId() {
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  return (
+    "acm-" +
+    Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("")
+  );
+}
+async function copyText(value: string) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+  const field = document.createElement("textarea");
+  field.value = value;
+  field.className = "clipboard-helper";
+  field.readOnly = true;
+  field.setAttribute("aria-hidden", "true");
+  const active = document.activeElement as HTMLElement | null;
+  document.body.appendChild(field);
+  try {
+    field.select();
+    field.setSelectionRange(0, field.value.length);
+    if (!document.execCommand("copy")) throw new Error("请选中文字手动复制");
+  } finally {
+    field.remove();
+    active?.focus();
+  }
+}
+
 function App() {
   const [me, setMe] = useState<any>(null),
     [loaded, setLoaded] = useState(false),
@@ -167,10 +198,7 @@ function App() {
     return () => clearInterval(id);
   }, [me, jobs, admin]);
   function open(c?: Client, op = "upsert") {
-    const id =
-      "acm-" +
-      crypto.randomUUID().replaceAll("-", "") +
-      crypto.randomUUID().slice(0, 8);
+    const id = newClientId();
     setForm({
       client: c
         ? { ...c }
@@ -1119,7 +1147,7 @@ function App() {
             className="primary"
             onClick={() =>
               run(async () => {
-                await navigator.clipboard.writeText(params);
+                await copyText(params);
                 setNotice("接入参数已复制");
               })
             }
@@ -1137,7 +1165,7 @@ function App() {
             className="primary"
             onClick={() =>
               run(async () => {
-                await navigator.clipboard.writeText(secret);
+                await copyText(secret);
                 setNotice("密钥已复制，请及时安全保存");
               })
             }

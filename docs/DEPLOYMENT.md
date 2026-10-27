@@ -12,7 +12,7 @@ Store all runtime settings outside the source checkout. The examples below use g
 
 ## Access
 
-The default binding is loopback. Use an SSH forward during initial acceptance, with the configured origin matching the local browser address. For normal network use, place a trusted HTTPS proxy in front of the loopback web port, set `ACM_ORIGIN` to that exact origin and set `ACM_SECURE_COOKIE=1`. Do not expose loopback HTTP through an unauthenticated tunnel.
+The default binding is loopback. Use an SSH forward during initial acceptance, with the configured origin matching the local browser address. For network access, set `ACM_BIND` to the intended interface and `ACM_ORIGIN` to the exact browser origin. Trusted HTTPS uses `ACM_SECURE_COOKIE=1`. If the deployment operator explicitly chooses trusted-LAN HTTP, use `ACM_SECURE_COOKIE=0`; the UI includes non-secure-context fallbacks for client IDs and copying text. Keep real interface addresses in the private env-file.
 
 ## Emergency recovery
 
