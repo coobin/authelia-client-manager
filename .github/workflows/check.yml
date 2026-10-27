@@ -10,7 +10,7 @@ jobs:
         with: {fetch-depth: 0}
       - uses: actions/setup-python@v5
         with: {python-version: '3.12'}
-      - run: pip install -r requirements.lock && pip install -e . --no-deps pytest pytest-asyncio
+      - run: pip install -r requirements.lock && pip install -e . --no-deps && pip install pytest pytest-asyncio
       - run: pytest -q
       - run: python scripts/privacy_check.py
       - uses: actions/setup-node@v4
