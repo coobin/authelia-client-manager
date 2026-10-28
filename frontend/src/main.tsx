@@ -83,8 +83,11 @@ async function api(path: string, body?: unknown) {
   if (!r.ok) {
     const error = new Error(
       typeof d.detail === "string" ? d.detail : "输入不正确",
-    ) as Error & { totpRequired?: boolean };
+    ) as Error & { totpRequired?: boolean; fields?: string[] };
     error.totpRequired = r.headers.get("X-ACM-TOTP-Required") === "1";
+    if (Array.isArray(d.fields)) {
+      error.fields = d.fields;
+    }
     throw error;
   }
   return d;
@@ -395,14 +398,19 @@ function App() {
   const [setupRequired, setSetupRequired] = useState(false),
     [confirmPassword, setConfirmPassword] = useState(""),
     [loginTotp, setLoginTotp] = useState(false);
+  const [errorFields, setErrorFields] = useState<string[]>([]);
   const admin = me?.role === "admin";
   async function run(fn: () => Promise<void>) {
     setBusy(true);
     setError("");
+    setErrorFields([]);
     try {
       await fn();
-    } catch (e) {
-      setError((e as Error).message);
+    } catch (e: any) {
+      setError(e.message);
+      if (Array.isArray(e.fields)) {
+        setErrorFields(e.fields);
+      }
     } finally {
       setBusy(false);
     }
@@ -477,16 +485,26 @@ function App() {
     setChecked(false);
     setAck(false);
     setError("");
+    setErrorFields([]);
   }
   function field(k: string, v: unknown) {
     if (!form) return;
     setForm({ ...form, client: { ...form.client, [k]: v } });
     setDraftId("");
     setChecked(false);
+    setError("");
+    setErrorFields([]);
   }
   async function save() {
     if (!form || !inv) return;
     const c = form.client;
+    const cleanedUris = (c.redirect_uris || [])
+      .map((u) => u.trim())
+      .filter((u) => u.length > 0);
+    const clientToSave = {
+      ...c,
+      redirect_uris: cleanedUris,
+    };
     const safe = Object.fromEntries(
       [
         "client_id",
@@ -501,8 +519,8 @@ function App() {
         "grant_types",
         "response_types",
       ]
-        .filter((k) => (c as any)[k] !== undefined)
-        .map((k) => [k, (c as any)[k]]),
+        .filter((k) => (clientToSave as any)[k] !== undefined)
+        .map((k) => [k, (clientToSave as any)[k]]),
     );
     const d = await api("/drafts", {
       ...form,
@@ -1155,6 +1173,11 @@ function App() {
                   <label>
                     应用名称
                     <input
+                      className={
+                        errorFields.includes("client.client_name")
+                          ? "input-error"
+                          : ""
+                      }
                       value={form.client.client_name}
                       onChange={(e) => field("client_name", e.target.value)}
                     />
@@ -1163,10 +1186,17 @@ function App() {
                     <label>
                       接入环境
                       <select
+                        className={
+                          errorFields.includes("environment")
+                            ? "input-error"
+                            : ""
+                        }
                         value={form.environment}
                         onChange={(e) => {
                           setForm({ ...form, environment: e.target.value });
                           setChecked(false);
+                          setError("");
+                          setErrorFields([]);
                         }}
                       >
                         <option value="production">生产</option>
@@ -1177,16 +1207,26 @@ function App() {
                     <label>
                       负责人
                       <input
-                        value={form.owner}
-                        onChange={(e) =>
-                          setForm({ ...form, owner: e.target.value })
+                        className={
+                          errorFields.includes("owner") ? "input-error" : ""
                         }
+                        value={form.owner}
+                        onChange={(e) => {
+                          setForm({ ...form, owner: e.target.value });
+                          setError("");
+                          setErrorFields([]);
+                        }}
                       />
                     </label>
                   </div>
                   <label>
                     客户端标识
                     <input
+                      className={
+                        errorFields.includes("client.client_id")
+                          ? "input-error"
+                          : ""
+                      }
                       value={form.client.client_id}
                       readOnly={
                         !!inv?.clients.some(
@@ -1229,6 +1269,11 @@ function App() {
                     登录回调地址
                     <textarea
                       rows={4}
+                      className={
+                        errorFields.includes("client.redirect_uris")
+                          ? "input-error"
+                          : ""
+                      }
                       value={form.client.redirect_uris.join("\n")}
                       onChange={(e) =>
                         field("redirect_uris", e.target.value.split("\n"))
@@ -1387,9 +1432,9 @@ function App() {
                 </>
               )}
               {error && (
-                <p className="error" role="alert">
-                  {error}
-                </p>
+                <div className="error" role="alert">
+                  <div className="error-text">{error}</div>
+                </div>
               )}
             </div>
             <footer>

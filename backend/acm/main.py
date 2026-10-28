@@ -71,6 +71,98 @@ class Agent:
             raise HTTPException(503, "发布代理暂不可用，请检查部署状态")
 
 
+
+def format_validation_error(exc: RequestValidationError) -> dict:
+    field_labels = {
+        "client.client_id": "客户端标识",
+        "client.client_name": "应用名称",
+        "client.redirect_uris": "登录回调地址",
+        "client.scopes": "资料范围",
+        "client.authorization_policy": "认证强度",
+        "client.require_pkce": "要求 PKCE",
+        "client.pkce_challenge_method": "PKCE 算法",
+        "client.token_endpoint_auth_method": "客户端认证方式",
+        "client.grant_types": "授权方式",
+        "client.response_types": "响应方式",
+        "client": "客户端配置",
+        "environment": "接入环境",
+        "owner": "负责人",
+        "username": "用户名",
+        "password": "密码",
+        "confirm_password": "确认密码",
+        "code": "动态验证码",
+        "draft_id": "草稿标识",
+        "acknowledge_restart": "重启确认",
+    }
+
+    formatted = []
+    fields = []
+
+    for err in exc.errors():
+        loc = [str(x) for x in err.get("loc", ()) if str(x) != "body"]
+        loc_key = ".".join(loc)
+        base_loc = ".".join([x for x in loc if not x.isdigit()])
+
+        err_type = err.get("type", "")
+        raw_msg = str(err.get("msg", ""))
+        clean_msg = raw_msg
+        if clean_msg.startswith("Value error, "):
+            clean_msg = clean_msg[len("Value error, "):]
+
+        label = field_labels.get(base_loc, field_labels.get(loc_key, base_loc or "页面填写内容"))
+
+        if "修正建议" in clean_msg:
+            formatted.append(clean_msg)
+            if "生产环境" in clean_msg:
+                fields.extend(["environment", "client.redirect_uris"])
+            elif base_loc:
+                fields.append(base_loc)
+            continue
+
+        if base_loc:
+            fields.append(base_loc)
+
+        if err_type == "string_pattern_mismatch":
+            if "client_id" in base_loc:
+                formatted.append(f"【{label}】格式不正确。修正建议：仅支持英文字母、数字、点(.)、下划线(_)、波浪线(~)及短横线(-)。")
+            elif "code" in base_loc:
+                formatted.append(f"【{label}】格式不正确。修正建议：请输入 6 位纯数字验证码。")
+            elif "username" in base_loc:
+                formatted.append(f"【{label}】格式不正确。修正建议：用户名不能包含空格或控制字符。")
+            else:
+                formatted.append(f"【{label}】格式不符合规则。修正建议：请检查并修改该项内容。")
+        elif err_type in ("string_too_short", "too_short"):
+            if "redirect_uris" in base_loc:
+                formatted.append(f"【{label}】不能为空。修正建议：请至少输入一行完整合法的回调地址（如 http://... 或 https://...）。")
+            elif "password" in base_loc or "confirm_password" in base_loc:
+                formatted.append(f"【{label}】长度不足。修正建议：密码至少需要 8 个字符。")
+            elif "client_name" in base_loc:
+                formatted.append(f"【{label}】不能为空。修正建议：请输入应用名称。")
+            elif "client_id" in base_loc:
+                formatted.append(f"【{label}】不能为空。修正建议：请输入客户端标识或使用自动生成的标识。")
+            else:
+                formatted.append(f"【{label}】不能为空。修正建议：请填写该项内容。")
+        elif err_type in ("string_too_long", "too_long"):
+            formatted.append(f"【{label}】内容过长。修正建议：请精简该项填写内容。")
+        elif err_type == "missing":
+            if "acknowledge_restart" in base_loc:
+                formatted.append(f"【{label}】未勾选。修正建议：发布会重启认证服务，请确认并勾选「我已确认变更内容和重启影响」。")
+            else:
+                formatted.append(f"【{label}】为必填项。修正建议：请填写该项内容。")
+        else:
+            formatted.append(f"【{label}】格式不正确。修正建议：请检查该项填写内容。")
+
+    fields = list(dict.fromkeys(fields))
+
+    if len(formatted) == 1:
+        detail = formatted[0]
+    elif len(formatted) > 1:
+        detail = "发现以下内容格式不正确：\n" + "\n".join(f"{i+1}. {text}" for i, text in enumerate(formatted))
+    else:
+        detail = "输入格式不正确，请检查页面填写内容"
+
+    return {"detail": detail, "fields": fields}
+
 def create_app(storage=None, agent=None, *, origin=None, secure=None, static=None):
     data = Path(os.getenv("ACM_DATA", "runtime/web"))
     s = storage or open_storage(data)
@@ -86,13 +178,8 @@ def create_app(storage=None, agent=None, *, origin=None, secure=None, static=Non
     @app.exception_handler(RequestValidationError)
     async def invalid(req, exc):
         # Pydantic's input/context fields can contain passwords. Never return them.
-        return JSONResponse(
-            {
-                "detail": "输入格式不正确，请检查页面填写内容",
-                "fields": [".".join(str(x) for x in e["loc"]) for e in exc.errors()],
-            },
-            status_code=422,
-        )
+        res = format_validation_error(exc)
+        return JSONResponse(res, status_code=422)
 
     @app.middleware("http")
     async def security(req, call_next):
@@ -204,7 +291,7 @@ def create_app(storage=None, agent=None, *, origin=None, secure=None, static=Non
     @app.post("/api/setup")
     def setup(body: Setup, req: Request):
         if body.password != body.confirm_password:
-            raise HTTPException(422, "两次输入的密码不一致")
+            raise HTTPException(422, "两次输入的密码不一致。修正建议：请确保「密码」与「确认密码」完全一致。")
         ip = req.client.host if req.client else "local"
         if not s.limit("setup:" + ip, maximum=8):
             raise HTTPException(429, "尝试次数较多，请稍后再试")

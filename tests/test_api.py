@@ -185,6 +185,49 @@ def test_production_http_rejected(system):
         },
     )
     assert r.status_code == 422
+    data = r.json()
+    assert "生产环境回调地址必须使用 HTTPS" in data["detail"]
+    assert "修正建议" in data["detail"]
+    assert "environment" in data["fields"]
+    assert "client.redirect_uris" in data["fields"]
+
+
+def test_validation_error_guidance(system):
+    c = login(system)
+    inv = c.get("/api/clients").json()
+    # Test invalid client_id
+    r = c.post(
+        "/api/drafts",
+        json={
+            "revision": inv["revision"],
+            "client": {
+                "client_id": "bad client id!",
+                "client_name": "Valid Name",
+                "redirect_uris": ["https://example.com/callback"],
+            },
+        },
+    )
+    assert r.status_code == 422
+    assert "客户端标识" in r.json()["detail"]
+    assert "修正建议" in r.json()["detail"]
+    assert "client.client_id" in r.json()["fields"]
+
+    # Test empty client_name
+    r = c.post(
+        "/api/drafts",
+        json={
+            "revision": inv["revision"],
+            "client": {
+                "client_id": "valid-id",
+                "client_name": "",
+                "redirect_uris": ["https://example.com/callback"],
+            },
+        },
+    )
+    assert r.status_code == 422
+    assert "应用名称" in r.json()["detail"]
+    assert "修正建议" in r.json()["detail"]
+    assert "client.client_name" in r.json()["fields"]
 
 
 def empty_system(system):

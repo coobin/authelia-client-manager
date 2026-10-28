@@ -342,13 +342,26 @@ td small {
   border-radius: 6px;
   line-height: 1.7;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   margin-bottom: 16px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 .error {
   background: #fff0ee;
   color: #a63d32;
+  border: 1px solid #f8c9c4;
+}
+.error-text {
+  flex: 1;
+}
+input.input-error,
+select.input-error,
+textarea.input-error {
+  border-color: #d93829 !important;
+  box-shadow: 0 0 0 1px #d93829 !important;
+  background-color: #fff9f8 !important;
 }
 .notice {
   background: #e8f5ee;
