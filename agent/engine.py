@@ -354,6 +354,49 @@ class Engine:
                 )
             ]
 
+    def verify_client(self, change):
+        """Check the receipt against live configuration without revealing its secret."""
+        from acm.models import Client
+
+        with self.lock:
+            _, _, clients = self.load()
+            with self.db.connect() as c:
+                job = c.execute(
+                    "SELECT state,message FROM jobs WHERE id=? AND client_id=?",
+                    (change.id, change.client.client_id),
+                ).fetchone()
+                pending = c.execute(
+                    "SELECT 1 FROM jobs WHERE client_id=? AND id<>? AND state IN ('queued','writing','checking','rolling_back','attention')",
+                    (change.client.client_id, change.id),
+                ).fetchone()
+            active = False
+            live = next(
+                (x for x in clients if x.get("client_id") == change.client.client_id),
+                None,
+            )
+            if job and job["state"] == "applied" and live and not pending:
+                try:
+                    configured = Client.model_validate(
+                        {k: v for k, v in live.items() if k in FIELDS}
+                    )
+                    active = (
+                        configured == change.client
+                        and not (set(live) - FIELDS - {"client_secret"})
+                        and (
+                            not live.get("client_secret")
+                            if change.client.public
+                            else bool(change.secret_hash)
+                            and live.get("client_secret") == change.secret_hash
+                        )
+                    )
+                except Exception:
+                    active = False
+            return {
+                "active": active,
+                "state": job["state"] if job else None,
+                "message": job["message"] if job else "",
+            }
+
     def update(self, jid, state, message):
         with self.db.connect() as c:
             c.execute(

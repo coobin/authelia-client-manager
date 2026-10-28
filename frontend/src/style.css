@@ -5,6 +5,78 @@
   font-synthesis: none;
   font-size: 14px;
 }
+.applicant-page {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #e8f0fa 0, #f3f6fa 48%, #eef4f8 100%);
+}
+.applicant-header {
+  background: #132f50;
+  color: #dce7f4;
+  min-height: 78px;
+  padding: 20px max(24px, calc((100vw - 1080px) / 2));
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+}
+.applicant-header a, .applicant-header > div {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.applicant-header strong { font-size: 19px; }
+.applicant-content { max-width: 1136px; padding: 38px 28px 80px; margin: auto; }
+.applicant-welcome { max-width: 670px; padding: 45px 0; }
+.applicant-welcome > svg { color: #2159b8; margin-bottom: 24px; }
+.applicant-welcome h1 { margin-bottom: 22px; font-size: 34px; }
+.applicant-welcome p, .applicant-welcome li { font-size: 16px; line-height: 1.85; }
+.applicant-welcome ol { padding-left: 22px; margin: 28px 0; }
+.portal-login { display: inline-block; background: #2159b8; color: white; padding: 14px 24px; border-radius: 7px; margin-bottom: 20px; font-weight: 600; }
+.portal-login:focus-visible { outline: 3px solid #85b6ff; outline-offset: 3px; }
+.application-toolbar, .application-title { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 24px; }
+.application-toolbar h2 { margin-bottom: 8px; }
+.application-toolbar p { margin-bottom: 0; }
+.application-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.muted { color: #6b7e90; line-height: 1.7; }
+.application-form, .application-detail { padding: 30px; background: white; border: 1px solid #d9e1eb; border-radius: 10px; }
+.application-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 24px; margin-top: 26px; }
+.application-fields .wide { grid-column: 1 / -1; }
+.application-rules { border: 1px solid #cbd7e4; border-radius: 7px; padding: 18px; margin: 6px 0 22px; }
+.application-rules summary { cursor: pointer; font-weight: 600; }
+.application-rules p { line-height: 1.8; margin: 15px 0 0; }
+.applications .check { flex-direction: row; align-items: flex-start; line-height: 1.7; font-weight: 400; }
+.applications .check input { width: 17px; height: 17px; margin-top: 3px; flex-shrink: 0; }
+.application-back { margin-bottom: 18px; }
+.application-summary { display: grid; grid-template-columns: 180px minmax(0, 1fr); margin: 24px 0; }
+.application-summary dt, .application-summary dd { padding: 12px 0; border-bottom: 1px solid #edf0f4; line-height: 1.7; }
+.application-summary dt { color: #6b7e90; }
+.application-summary dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.application-review { padding-top: 26px; margin-top: 26px; border-top: 1px solid #d9e1eb; }
+.request-value { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; }
+.application-secret { border-left: 3px solid #2159b8; padding: 20px; background: #edf4ff; }
+.application-timeline { list-style: none; padding: 0; }
+.application-timeline li { padding: 0 0 22px 18px; border-left: 2px solid #d9e1eb; }
+.application-timeline time { display: block; color: #6b7e90; margin-bottom: 6px; font-size: 12px; }
+.application-timeline p { white-space: pre-wrap; margin: 8px 0 0; line-height: 1.7; }
+.application-empty { text-align: center; padding: 50px 20px; color: #6b7e90; }
+.application-empty svg { margin-bottom: 12px; }
+.request-submitted, .request-publishing { background: #eaf1ff; color: #2159b8; }
+.request-returned, .request-attention, .request-failed { background: #fff2de; color: #85520b; }
+.request-ready, .request-completed { background: #e4f4ed; color: #21694d; }
+.request-rejected { background: #fbe8e8; color: #a53939; }
+@media (max-width: 700px) {
+  .applicant-header { padding: 18px; flex-wrap: wrap; }
+  .applicant-header > div { flex-wrap: wrap; }
+  .applicant-content { padding: 25px 16px 50px; }
+  .applicant-welcome { padding-top: 25px; }
+  .applicant-welcome h1 { font-size: 27px; }
+  .application-form, .application-detail { padding: 20px 16px; }
+  .application-fields { grid-template-columns: minmax(0, 1fr); }
+  .application-toolbar, .application-title { flex-wrap: wrap; }
+  .application-summary { grid-template-columns: minmax(0, 1fr); }
+  .application-summary dt { border-bottom: 0; padding-bottom: 0; }
+  .application-summary dd { padding-top: 3px; }
+}
 * {
   box-sizing: border-box;
 }

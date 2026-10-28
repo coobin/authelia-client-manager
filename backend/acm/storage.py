@@ -43,6 +43,10 @@ CREATE TABLE IF NOT EXISTS metadata(client_id TEXT PRIMARY KEY,owner TEXT,enviro
 CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY,at INTEGER,actor TEXT,action TEXT,target TEXT);
 CREATE TABLE IF NOT EXISTS limits(key TEXT PRIMARY KEY,count INTEGER,until INTEGER);
 CREATE TABLE IF NOT EXISTS totp_enrollments(username TEXT PRIMARY KEY,secret BLOB,expires INTEGER);
+CREATE TABLE IF NOT EXISTS applicants(username TEXT PRIMARY KEY,issuer TEXT NOT NULL,subject TEXT NOT NULL,name TEXT NOT NULL,email TEXT NOT NULL,UNIQUE(issuer,subject));
+CREATE TABLE IF NOT EXISTS oidc_states(id TEXT PRIMARY KEY,browser TEXT NOT NULL,nonce TEXT NOT NULL,verifier BLOB NOT NULL,expires INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS applications(id TEXT PRIMARY KEY,applicant TEXT NOT NULL,payload TEXT NOT NULL,status TEXT NOT NULL,version INTEGER NOT NULL DEFAULT 1,created INTEGER NOT NULL,updated INTEGER NOT NULL,reviewer TEXT NOT NULL DEFAULT '',comment TEXT NOT NULL DEFAULT '',approved TEXT,draft_id TEXT,claimed_at INTEGER,acceptance TEXT NOT NULL DEFAULT '',operation TEXT NOT NULL DEFAULT 'upsert');
+CREATE TABLE IF NOT EXISTS application_events(id INTEGER PRIMARY KEY,application_id TEXT NOT NULL,at INTEGER NOT NULL,actor TEXT NOT NULL,action TEXT NOT NULL,comment TEXT NOT NULL DEFAULT '');
 """)
 
         # Preserve legacy enrollment until explicitly changed by the administrator.
@@ -60,7 +64,7 @@ CREATE TABLE IF NOT EXISTS totp_enrollments(username TEXT PRIMARY KEY,secret BLO
                 )
 
     def setup_required(self, c):
-        rows = c.execute("SELECT username,role,needs_setup FROM admins").fetchall()
+        rows = c.execute("SELECT username,role,needs_setup FROM admins WHERE role='admin'").fetchall()
         return not rows or (
             len(rows) == 1
             and rows[0]["role"] == "admin"
@@ -85,6 +89,7 @@ CREATE TABLE IF NOT EXISTS totp_enrollments(username TEXT PRIMARY KEY,secret BLO
         with self.connect() as c:
             c.execute("DELETE FROM deliveries WHERE expires<? OR claimed=1", (now(),))
             c.execute("DELETE FROM totp_enrollments WHERE expires<?", (now(),))
+            c.execute("DELETE FROM oidc_states WHERE expires<?", (now(),))
             c.execute(
                 "DELETE FROM sessions WHERE created<? OR seen<?",
                 (now() - 28800, now() - 1800),

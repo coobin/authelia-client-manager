@@ -27,6 +27,8 @@ class LocalAgent:
             return self.e.validate(AgentChange.model_validate(data))
         if path == "/deploy":
             return self.e.deploy(AgentChange.model_validate(data))
+        if path == "/verify-client":
+            return self.e.verify_client(AgentChange.model_validate(data))
 
 
 @pytest.fixture

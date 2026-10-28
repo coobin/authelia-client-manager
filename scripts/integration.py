@@ -131,6 +131,7 @@ try:
         time.sleep(1)
     assert j["state"] == "applied", j
     assert len(e.inventory()["clients"]) == 2
+    assert e.verify_client(ch)["active"], "live credential receipt must match"
     print("Native validation and actual provider publication passed", flush=True)
     # Validate client secret hash with the native cryptographic implementation.
     result = ct.exec_run(
@@ -258,6 +259,7 @@ try:
     )
     e.rollback(ch.id, uuid4().hex)
     assert (root / "configuration.yml").read_bytes() == before
+    assert not e.verify_client(ch)["active"], "rolled-back credentials must not be delivered"
     print("Actual provider rollback passed", flush=True)
     # Code + PKCE initial authorization must recognize the preserved client.
     verifier = secrets.token_urlsafe(48)

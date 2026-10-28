@@ -93,6 +93,24 @@ def format_validation_error(exc: RequestValidationError) -> dict:
         "code": "动态验证码",
         "draft_id": "草稿标识",
         "acknowledge_restart": "重启确认",
+        "name": "应用名称",
+        "purpose": "应用用途",
+        "department": "申请部门",
+        "business_owner": "业务负责人",
+        "technical_owner": "技术负责人",
+        "contact": "联系方式",
+        "app_type": "应用类型",
+        "framework": "开发框架及 OIDC 组件",
+        "access_url": "应用访问地址",
+        "redirect_uris": "完整登录回调地址",
+        "audience": "使用人群及访问限制",
+        "roles": "业务角色及管理员授权方式",
+        "sensitive": "敏感业务说明",
+        "launch_date": "期望上线日期",
+        "agreement": "接入要求确认",
+        "version": "申请版本",
+        "results": "验收结果",
+        "comment": "审批意见",
     }
 
     formatted = []
@@ -226,6 +244,11 @@ def create_app(storage=None, agent=None, *, origin=None, secure=None, static=Non
             raise HTTPException(403, "需要管理员权限")
         return u
 
+    def staff(u=Depends(current)):
+        if u["role"] not in ("admin", "viewer"):
+            raise HTTPException(403, "需要管理后台权限")
+        return u
+
     def fresh(u=Depends(admin)):
         if u["reauth"] < now() - 300:
             raise HTTPException(403, "请先完成近期安全验证")
@@ -282,6 +305,17 @@ def create_app(storage=None, agent=None, *, origin=None, secure=None, static=Non
             path="/",
         )
         return r
+
+    from .oidc import install_oidc
+    from .applications import install_applications
+    install_oidc(app, s, origin, secure, session_response)
+    install_applications(app, s, a, current, admin, fresh)
+
+    def application_delivery(c, did):
+        return c.execute(
+            "SELECT 1 FROM applications a JOIN deliveries d ON a.draft_id=d.draft_id WHERE d.id=?",
+            (did,),
+        ).fetchone()
 
     @app.get("/api/auth/status")
     def auth_status():
@@ -391,7 +425,7 @@ def create_app(storage=None, agent=None, *, origin=None, secure=None, static=Non
 
     @app.get("/api/health")
     def health():
-        return {"status": "ok", "version": "0.1.1"}
+        return {"status": "ok", "version": "0.2.0"}
 
     @app.post("/api/login")
     def login(body: Login, req: Request):
@@ -404,7 +438,12 @@ def create_app(storage=None, agent=None, *, origin=None, secure=None, static=Non
 
     @app.get("/api/me")
     def me(u=Depends(current)):
-        return {k: u[k] for k in ("username", "role", "csrf", "reauth", "totp_enabled")}
+        result = {k: u[k] for k in ("username", "role", "csrf", "reauth", "totp_enabled")}
+        with s.connect() as c:
+            profile = c.execute("SELECT name,email FROM applicants WHERE username=?", (u["username"],)).fetchone()
+        if profile:
+            result.update(dict(profile))
+        return result
 
     @app.post("/api/logout")
     def logout(u=Depends(current)):
@@ -424,7 +463,7 @@ def create_app(storage=None, agent=None, *, origin=None, secure=None, static=Non
         return {"ok": True}
 
     @app.get("/api/clients")
-    def clients(u=Depends(current)):
+    def clients(u=Depends(staff)):
         inv = a.call("GET", "/inventory")
         with s.connect() as c:
             meta = {
@@ -437,7 +476,7 @@ def create_app(storage=None, agent=None, *, origin=None, secure=None, static=Non
         return inv
 
     @app.get("/api/drafts")
-    def drafts(u=Depends(current)):
+    def drafts(u=Depends(staff)):
         with s.connect() as c:
             rows = c.execute(
                 "SELECT id,payload,owner,environment,created,validated,used FROM drafts ORDER BY created DESC LIMIT 100"
@@ -528,6 +567,9 @@ def create_app(storage=None, agent=None, *, origin=None, secure=None, static=Non
             ).fetchone()
         if not r or not r["validated"]:
             raise HTTPException(409, "请先校验草稿")
+        with s.connect() as c:
+            if c.execute("SELECT 1 FROM applications WHERE draft_id=?", (body.draft_id,)).fetchone():
+                raise HTTPException(409, "申请产生的草稿请在接入申请中发布")
         result = a.call("POST", "/deploy", json.loads(r["payload"]))
         with s.connect() as c:
             c.execute("UPDATE drafts SET used=1 WHERE id=?", (body.draft_id,))
@@ -535,7 +577,7 @@ def create_app(storage=None, agent=None, *, origin=None, secure=None, static=Non
         return result
 
     @app.get("/api/deployments")
-    def deployments(u=Depends(current)):
+    def deployments(u=Depends(staff)):
         jobs = a.call("GET", "/jobs")
         for j in jobs:
             if j["state"] == "applied" and j["operation"] in ("upsert", "restore"):
@@ -563,7 +605,7 @@ def create_app(storage=None, agent=None, *, origin=None, secure=None, static=Non
         applied_ids = {j["id"] for j in jobs if j.get("state") == "applied"}
         with s.connect() as c:
             rows = c.execute(
-                "SELECT d.id, d.draft_id, d.expires, dr.payload FROM deliveries d LEFT JOIN drafts dr ON d.draft_id=dr.id WHERE d.claimed=0 ORDER BY d.expires"
+                "SELECT d.id, d.draft_id, d.expires, dr.payload FROM deliveries d LEFT JOIN drafts dr ON d.draft_id=dr.id WHERE d.claimed=0 AND NOT EXISTS(SELECT 1 FROM applications a WHERE a.draft_id=d.draft_id) ORDER BY d.expires"
             ).fetchall()
             res = []
             for r in rows:
@@ -593,6 +635,8 @@ def create_app(storage=None, agent=None, *, origin=None, secure=None, static=Non
         if not s.limit("claim-info:" + ip, maximum=60):
             raise HTTPException(429, "请求过于频繁，请稍后再试")
         with s.connect() as c:
+            if application_delivery(c, did):
+                raise HTTPException(404, "请登录申请入口领取")
             r = c.execute(
                 "SELECT d.id, d.draft_id, d.expires, d.claimed, dr.payload FROM deliveries d LEFT JOIN drafts dr ON d.draft_id=dr.id WHERE d.id=?",
                 (did,),
@@ -627,6 +671,8 @@ def create_app(storage=None, agent=None, *, origin=None, secure=None, static=Non
         jobs = a.call("GET", "/jobs")
         with s.connect() as c:
             c.execute("BEGIN IMMEDIATE")
+            if application_delivery(c, did):
+                raise HTTPException(404, "请登录申请入口领取")
             r = c.execute(
                 "SELECT d.id, d.draft_id, d.secret, d.expires, d.claimed, dr.payload FROM deliveries d LEFT JOIN drafts dr ON d.draft_id=dr.id WHERE d.id=?",
                 (did,),
@@ -659,6 +705,8 @@ def create_app(storage=None, agent=None, *, origin=None, secure=None, static=Non
         jobs = a.call("GET", "/jobs")
         with s.connect() as c:
             c.execute("BEGIN IMMEDIATE")
+            if application_delivery(c, did):
+                raise HTTPException(403, "申请密钥仅由申请人本人领取")
             r = c.execute("SELECT * FROM deliveries WHERE id=?", (did,)).fetchone()
             if not r or r["claimed"] or r["expires"] < now():
                 raise HTTPException(410, "密钥已领取或已过期")
@@ -672,7 +720,7 @@ def create_app(storage=None, agent=None, *, origin=None, secure=None, static=Non
         return {"secret": plain}
 
     @app.get("/api/audit")
-    def audit(u=Depends(current)):
+    def audit(u=Depends(staff)):
         with s.connect() as c:
             return [
                 dict(r)
@@ -689,6 +737,7 @@ def create_app(storage=None, agent=None, *, origin=None, secure=None, static=Non
             return FileResponse(static / "index.html")
         raise HTTPException(503, "请先构建前端资源")
 
+    @app.get("/apply")
     @app.get("/")
     def index():
         if (static / "index.html").exists():

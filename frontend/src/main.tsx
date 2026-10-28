@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import "./style.css";
 import QRCode from "qrcode";
+import { ApplicantPortal, ApplicationPanel } from "./applications";
 type Client = {
   client_id: string;
   client_name: string;
@@ -442,7 +443,7 @@ function App() {
       .finally(() => setLoaded(true));
   }, []);
   useEffect(() => {
-    if (me) run(refresh);
+    if (me && me.role !== "applicant") run(refresh);
   }, [me]);
   useEffect(() => {
     if (!me) return;
@@ -558,6 +559,7 @@ function App() {
       />
     );
   if (!loaded) return <div className="loading">正在打开管理工具…</div>;
+  if (me?.role === "applicant") return <ApplicantPortal />;
   if (!me)
     return (
       <main className="login-page">
@@ -678,6 +680,7 @@ function App() {
               ? "双因素认证默认关闭，可在设置中开启。"
               : "开启双因素认证的账户需要验证动态码。"}
           </small>
+          {!setupRequired && <a href="/apply">应用接入申请入口</a>}
         </form>
       </main>
     );
@@ -693,6 +696,7 @@ function App() {
         <nav>
           {[
             ["clients", "应用登记", Layers],
+            ...(admin ? [["applications", "接入申请", ClipboardList]] : []),
             ["drafts", "待发布", ClipboardList],
             ["jobs", "发布记录", History],
             ["audit", "操作记录", ShieldCheck],
@@ -750,6 +754,7 @@ function App() {
                     jobs: "发布记录",
                     audit: "操作记录",
                     settings: "设置",
+                    applications: "接入申请",
                   } as any
                 )[tab]
               }
@@ -763,12 +768,14 @@ function App() {
                     jobs: "查看发布结果",
                     audit: "查看管理操作",
                     settings: "账户安全设置",
+                    applications: "审批应用接入申请",
                   } as any
                 )[tab]
               }
             </h1>
           </div>
           <div className="header-actions">
+            {admin && <a href="/apply">接入申请入口</a>}
             <button title="刷新" onClick={() => run(refresh)}>
               <RefreshCw size={17} />
             </button>
@@ -816,6 +823,7 @@ function App() {
             updated={async () => setMe(await api("/me"))}
           />
         )}
+        {tab === "applications" && admin && <ApplicationPanel api={api} admin me={me} />}
         {tab === "clients" && (
           <>
             <div className="toolbar">
@@ -1734,4 +1742,6 @@ function Modal({
     </div>
   );
 }
-createRoot(document.getElementById("root")!).render(<App />);
+createRoot(document.getElementById("root")!).render(
+  window.location.pathname === "/apply" ? <ApplicantPortal /> : <App />,
+);

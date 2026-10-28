@@ -15,6 +15,10 @@ Initial release targeting **Authelia 4.39.1**, a single YAML configuration and a
 - Restart only the configured target, record durable outcomes and compensate failed deployments.
 - Browser-based first administrator setup, Argon2id passwords and optional TOTP, CSRF protection and audit records.
 - View and copy application connection parameters.
+- Employee OIDC login and a separate `/apply` portal for online applications,
+  returned submissions, administrator review, controlled publication and acceptance.
+- Applicant-bound one-time secret claims and administrator-controlled reissue;
+  application credentials cannot be claimed through anonymous delivery links.
 
 Saving a draft does not publish it. Publishing restarts the target provider and can interrupt in-flight login. Disabling a client does not end existing application sessions. Secret rotation requires coordination with the application owner.
 
@@ -39,7 +43,7 @@ Read [deployment instructions](docs/DEPLOYMENT.md) and [security boundaries](SEC
 ```sh
 npm ci --prefix frontend
 npm run build --prefix frontend
-docker build -t authelia-client-manager:0.1.1 .
+docker build -t authelia-client-manager:0.2.0 .
 ```
 
 The web container has no Docker socket or original provider configuration. The separate agent container has Docker access and must be treated as a high-privilege component. It uses fixed local target settings and has no TCP network. Start in read-only mode and verify imported applications before enabling writes.
@@ -56,6 +60,9 @@ python3 scripts/privacy_check.py
 ```
 
 See [the integration procedure](docs/TESTING.md) for validation against a disposable provider. Never attach integration tests to production directory, storage, Redis or employee accounts.
+
+See [the application portal guide](docs/APPLICATION_PORTAL.md) for employee
+login configuration, online review, delivery and acceptance.
 
 ## Privacy and limitations
 

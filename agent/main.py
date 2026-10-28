@@ -46,6 +46,10 @@ def create_app(engine=None):
     def jobs():
         return e.jobs()
 
+    @app.post("/verify-client")
+    def verify_client(ch: AgentChange):
+        return e.verify_client(ch)
+
     class Rollback(BaseModel):
         id: str = Field(pattern=r"^[a-f0-9]{32}$")
         new_id: str = Field(pattern=r"^[a-f0-9]{32}$")

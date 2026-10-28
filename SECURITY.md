@@ -10,6 +10,14 @@ The first administrator is created through a same-origin, transaction-guarded se
 
 New secrets use PBKDF2-SHA512 for provider storage and AES-GCM for temporary delivery. The independent master key is stored in the web data directory, never in the database, image or source. Back up that key securely with the data. Logical deletion of a delivered secret does not guarantee physical erasure from SQLite, WAL, backups or storage media.
 
+Employee OIDC identities use a separate applicant role bound to issuer and
+subject. They cannot read the administrator inventory, drafts, audit or
+publication APIs. Online application secrets are bound to their applicant and
+are unavailable through the older anonymous delivery links or administrator
+claim API. Before delivery the private agent verifies the exact job receipt,
+live approved configuration and live credential hash. The browser receives
+neither hashes nor temporary delivery IDs for these applications.
+
 Use trusted HTTPS for exposed access. The explicit loopback HTTP profile is intended only for local demonstration or an SSH tunnel. Do not trust arbitrary forwarded identity headers. Proxy and application logs must not record cookies, credentials, authorization codes, tokens or request bodies.
 
 Publishing is a privileged operation that restarts the provider. Version conflicts block publication. Automatic recovery stops if a third party changed the configuration. Separate directory/Redis outages may require manual recovery; never advertise all failures as automatically recoverable.
