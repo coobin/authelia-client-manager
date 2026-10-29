@@ -12,24 +12,38 @@ const states: Record<string, string> = {
 const envs: Record<string, string> = { development: "开发", test: "测试", production: "生产" };
 const defaults = {
   name: "", purpose: "", department: "", business_owner: "", technical_owner: "",
-  contact: "", environment: "test", app_type: "backend", framework: "",
+  contact: "", environment: "test", app_type: "backend",
   access_url: "", redirect_uris: [""], agreement: false,
 };
 const fields: [string, string, string?][] = [
   ["name", "应用名称"], ["purpose", "应用用途", "area"], ["department", "申请部门"],
   ["business_owner", "业务负责人"], ["technical_owner", "技术负责人"],
-  ["contact", "联系方式"], ["framework", "开发框架及 OIDC 组件"],
-  ["access_url", "应用访问地址", "url"],
+  ["contact", "联系方式"],
 ];
 
-function ApplicationForm({ initial, onSave, onCancel, busy }: {
-  initial: any; onSave: (data: any) => void; onCancel: () => void; busy: boolean;
+function ApplicationForm({ initial, onSave, onCancel, busy, domain }: {
+  domain: string; initial: any; onSave: (data: any) => void; onCancel: () => void; busy: boolean;
 }) {
   const [data, setData] = useState({ ...defaults, ...initial, agreement: false });
+  const initialHost = (() => {
+    if (!domain || !initial?.access_url) return "";
+    try {
+      const u = new URL(initial.access_url);
+      const prefix = u.hostname.endsWith("." + domain) ? u.hostname.slice(0, -(domain.length + 1)) : "";
+      return /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(prefix)
+        && initial.access_url === `https://${prefix}.${domain}`
+        && initial.redirect_uris?.length === 1
+        && initial.redirect_uris[0] === `https://${prefix}.${domain}/auth/callback` ? prefix : "";
+    } catch { return ""; }
+  })();
+  const [subdomain, setSubdomain] = useState(initialHost);
+  const [custom, setCustom] = useState(!domain || (!!initial?.access_url && !initialHost));
+  const accessUrl = subdomain ? `https://${subdomain}.${domain}` : "";
+  const callbackUrl = accessUrl ? accessUrl + "/auth/callback" : "";
   const update = (key: string, value: any) => setData((d: any) => ({ ...d, [key]: value }));
   return <form className="application-form" onSubmit={e => {
     e.preventDefault();
-    onSave({ ...Object.fromEntries(Object.keys(defaults).map(key => [key, data[key]])), redirect_uris: data.redirect_uris.map((x: string) => x.trim()).filter(Boolean) });
+    onSave({ ...Object.fromEntries(Object.keys(defaults).map(key => [key, data[key]])), access_url: custom ? data.access_url : accessUrl, redirect_uris: custom ? data.redirect_uris.map((x: string) => x.trim()).filter(Boolean) : [callbackUrl] });
   }}>
     <h2>{initial?.name ? "补充申请资料" : "申请应用接入"}</h2>
     <p className="muted">每个应用、每个环境独立申请。提交后可在这里查看审批进度、领取接入参数和密钥。带 * 的为必填项。</p>
@@ -39,9 +53,7 @@ function ApplicationForm({ initial, onSave, onCancel, busy }: {
         {type === "area"
           ? <textarea required maxLength={2000} rows={3} value={data[key]} onChange={e => update(key, e.target.value)} />
           : <input required type={type || "text"} maxLength={key === "access_url" ? 2048 : 150}
-                   value={data[key]} placeholder={key === "framework" ? "例如：Spring Boot + Spring Security；不清楚可填“待开发确认”" : key === "access_url" ? "例如：https://app.example.com" : undefined} onChange={e => update(key, e.target.value)} />}
-        {key === "framework" && <small>应用用什么技术开发、用什么组件接入统一登录。请开发人员填写；不清楚可先填“待开发确认”。</small>}
-        {key === "access_url" && <small>员工平时打开这个应用的网址，填写完整的首页或入口地址；不是认证服务地址。</small>}
+                   value={data[key]} onChange={e => update(key, e.target.value)} />}
       </label>)}
       <label><span>接入环境<span className="required-mark" aria-hidden="true"> *</span></span><select required value={data.environment} onChange={e => update("environment", e.target.value)}>
         {Object.entries(envs).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
@@ -49,12 +61,30 @@ function ApplicationForm({ initial, onSave, onCancel, busy }: {
       <label><span>应用类型<span className="required-mark" aria-hidden="true"> *</span></span><select required value={data.app_type} onChange={e => update("app_type", e.target.value)}>
         <option value="backend">有后端的 Web 系统</option><option value="spa">纯前端应用</option><option value="mobile">移动应用</option>
       </select><small>{data.app_type === "backend" ? "密钥仅保存在服务端。" : "公共客户端使用 PKCE，不分配客户端密钥。"}</small></label>
-      <label className="wide"><span>登录回调地址<span className="required-mark" aria-hidden="true"> *</span></span>
-        <textarea required rows={3} value={data.redirect_uris.join("\n")}
-          onChange={e => update("redirect_uris", e.target.value.split("\n"))}
-          placeholder="例如：https://app.example.com/auth/callback（仅示例，请以应用组件配置为准）" />
-        <small>没有统一的回调路径。请向开发人员获取应用 OIDC 组件的回调地址，填写完整网址（域名和路径），每行一个，不支持 * 通配域名。可以约定回调路径为 /auth/callback，但应用必须实际支持该路径。它通常不是应用首页；必须与应用配置完全一致，生产环境使用 HTTPS。</small>
-      </label>
+      {domain && <label className="check wide"><input type="checkbox" checked={custom} onChange={e => {
+        if (e.target.checked && accessUrl) setData((d: any) => ({ ...d, access_url: accessUrl, redirect_uris: [callbackUrl] }));
+        setCustom(e.target.checked);
+      }} />自定义地址</label>}
+      {!custom ? <>
+        <label className="wide"><span>应用子域名<span className="required-mark" aria-hidden="true"> *</span></span>
+          <div className="application-domain"><span>https://</span><input required aria-label="应用子域名" autoCapitalize="none" autoCorrect="off" spellCheck={false}
+            pattern={"[a-z0-9]([a-z0-9\\-]{0,61}[a-z0-9])?"} maxLength={63} placeholder="例如：oa" value={subdomain}
+            onChange={e => setSubdomain(e.target.value.toLowerCase())} title="只填写子域名，可用小写字母、数字和中间的短横线" /><span>.{domain}</span></div>
+          <small>只填写子域名，例如 oa；应用需支持 /auth/callback 回调路径。已有应用使用其他地址时，选择“自定义地址”。</small>
+        </label>
+        <div className="application-address-preview wide" aria-live="polite"><p>应用访问地址：<strong>{accessUrl || "填写子域名后自动生成"}</strong></p>
+          <p>登录回调地址：<strong>{callbackUrl || "填写子域名后自动生成"}</strong></p></div>
+      </> : <>
+        <label className="wide"><span>应用访问地址<span className="required-mark" aria-hidden="true"> *</span></span>
+          <input required type="url" maxLength={2048} value={data.access_url} onChange={e => update("access_url", e.target.value)} placeholder="https://app.example.com" />
+          <small>员工平时打开应用的完整网址。</small>
+        </label>
+        <label className="wide"><span>登录回调地址<span className="required-mark" aria-hidden="true"> *</span></span>
+          <textarea required rows={3} value={data.redirect_uris.join("\n")} onChange={e => update("redirect_uris", e.target.value.split("\n"))}
+            placeholder="每行一个完整回调地址" />
+          <small>以应用登录组件的实际配置为准，必须完全一致，不支持通配符；生产环境使用 HTTPS。</small>
+        </label>
+      </>}
     </div>
     <details className="application-rules"><summary>统一认证接入要求</summary>
       <p>使用授权码流程和 PKCE S256；通过成熟 OIDC 组件校验 state、nonce、签名、Issuer、Audience 和令牌有效期。以 Issuer 与 sub 关联用户。</p>
@@ -74,7 +104,7 @@ function parameters(d: any) {
   return `Issuer: ${p.issuer}\nDiscovery: ${p.discovery}\nClient ID: ${c.client_id}\nScope: ${c.scopes.join(" ")}\nFlow: Authorization Code + PKCE S256\nToken endpoint auth: ${c.token_endpoint_auth_method}\nRedirect URIs:\n${c.redirect_uris.join("\n")}\n${c.public ? "公共客户端，无 Client Secret" : "Client Secret 请单独领取并保存至服务端秘密配置"}`;
 }
 
-export function ApplicationPanel({ api, admin = false, me }: { api: Api; admin?: boolean; me: any }) {
+export function ApplicationPanel({ api, admin = false, me, domain = "" }: { api: Api; admin?: boolean; me: any; domain?: string }) {
   const [list, setList] = useState<any[]>([]), [detail, setDetail] = useState<any>(null);
   const [editing, setEditing] = useState(false), [error, setError] = useState(""), [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false), [secret, setSecret] = useState("");
@@ -132,7 +162,7 @@ export function ApplicationPanel({ api, admin = false, me }: { api: Api; admin?:
       {!!me?.totp_enabled && <label>动态验证码<input required value={code} onChange={e => setCode(e.target.value)} inputMode="numeric" pattern="[0-9]{6}" /></label>}
       <button className="primary" disabled={busy}>验证</button>
     </form>}
-    {editing ? <ApplicationForm busy={busy} initial={detail?.payload || { technical_owner: me?.name || "", contact: me?.email || "" }}
+    {editing ? <ApplicationForm domain={domain} busy={busy} initial={detail?.payload || { technical_owner: me?.name || "", contact: me?.email || "" }}
       onCancel={() => setEditing(false)} onSave={data => run(async () => {
         const result = detail
           ? await api(`/applications/${detail.id}/resubmit`, { ...data, version: detail.version })
@@ -145,6 +175,7 @@ export function ApplicationPanel({ api, admin = false, me }: { api: Api; admin?:
           <span className={"tag request-" + detail.status}>{states[detail.status] || detail.status}</span></div>
         <dl className="application-summary">{fields.map(([k, label]) => <React.Fragment key={k}><dt>{label}</dt><dd>{detail.payload[k]}</dd></React.Fragment>)}
           <dt>应用类型</dt><dd>{{ backend: "有后端的 Web 系统", spa: "纯前端", mobile: "移动应用" }[detail.payload.app_type as string]}</dd>
+          <dt>应用访问地址</dt><dd>{detail.payload.access_url}</dd>
           <dt>登录回调地址</dt><dd>{detail.payload.redirect_uris.join("\n")}</dd>
           <dt>资料范围</dt><dd>openid profile email{detail.payload.groups ? " groups" : ""}</dd>
         </dl>
@@ -208,6 +239,7 @@ export function ApplicantPortal() {
   const [me, setMe] = useState<any>(null), [ready, setReady] = useState(false), [enabled, setEnabled] = useState(false);
   const [error, setError] = useState(new URLSearchParams(location.search).get("login") === "failed" ? "统一登录未完成，请重新登录；仍失败时联系管理员。" : "");
   const [csrf, setCsrf] = useState("");
+  const [domain, setDomain] = useState("");
   const api: Api = async (path, body) => {
     const r = await fetch("/api" + path, { method: body === undefined ? "GET" : "POST",
       headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
@@ -218,7 +250,7 @@ export function ApplicantPortal() {
   };
   useEffect(() => {
     Promise.all([api("/applicant/auth"), api("/me").catch(() => null)]).then(([auth, user]) => {
-      setEnabled(auth.enabled); setMe(user); setCsrf(user?.csrf || "");
+      setDomain(auth.application_domain || ""); setEnabled(auth.enabled); setMe(user); setCsrf(user?.csrf || "");
     }).catch(e => setError(e.message)).finally(() => setReady(true));
   }, []);
   return <div className="applicant-page"><header className="applicant-header"><a href="/apply"><KeyRound size={25} /><strong>统一认证接入</strong></a>
@@ -227,7 +259,7 @@ export function ApplicantPortal() {
     }}><LogOut size={16} />退出</button></> : null}</div></header>
     <main className="applicant-content">{!ready ? <p>正在打开申请入口…</p> : me ? <>
       {me.role === "admin" && <div className="banner">当前以管理员身份查看申请入口。<a href="/">返回管理后台审批</a></div>}
-      <ApplicationPanel key={me.username} api={api} me={me} />
+      <ApplicationPanel key={me.username} api={api} me={me} domain={domain} />
     </> : <section className="applicant-welcome"><ClipboardList size={42} /><h1>申请应用统一认证接入</h1>
       <p>用员工账号登录，提交应用接入资料。审批发布完成后，在这里领取接入参数和密钥，并完成联调验收。</p>
       <ol><li>填写应用和权限需求</li><li>管理员审核并发布</li><li>领取凭据，完成接入验收</li></ol>

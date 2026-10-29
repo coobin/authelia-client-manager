@@ -52,7 +52,7 @@ def install_oidc(app, storage, origin, secure, session_response):
 
     @app.get("/api/applicant/auth")
     def status():
-        return {"enabled": enabled}
+        return {"enabled": enabled, "application_domain": os.getenv("ACM_APPLICATION_DOMAIN", "").strip().lower()}
 
     @app.get("/api/applicant/login")
     def login(req: Request):

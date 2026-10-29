@@ -1,12 +1,13 @@
 name: authelia-client-manager
 services:
   web:
-    image: ${ACM_IMAGE:-authelia-client-manager:0.2.2}
+    image: ${ACM_IMAGE:-authelia-client-manager:0.2.3}
     user: ${ACM_UID:-10001}:${ACM_GID:-10001}
     restart: unless-stopped
     ports:
       - "${ACM_BIND:-127.0.0.1}:8098:8098"
     environment:
+      ACM_APPLICATION_DOMAIN: ${ACM_APPLICATION_DOMAIN:-}
       ACM_DATA: /data
       ACM_AGENT_SOCKET: /run/acm/agent.sock
       ACM_ORIGIN: ${ACM_ORIGIN:-https://manager.example.com}
@@ -30,7 +31,7 @@ services:
       driver: json-file
       options: {max-size: 5m, max-file: "2"}
   agent:
-    image: ${ACM_IMAGE:-authelia-client-manager:0.2.2}
+    image: ${ACM_IMAGE:-authelia-client-manager:0.2.3}
     user: "0:0"
     group_add: ["${ACM_DOCKER_GID:?set Docker socket group}", "${ACM_GID:-10001}"]
     restart: unless-stopped

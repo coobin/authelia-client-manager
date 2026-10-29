@@ -439,7 +439,7 @@ def test_external_credential_change_blocks_old_secret_delivery(system):
 def test_simplified_form_and_unavailable_department_scope(system):
     employee = applicant(system)
     data = payload()
-    for key in ("audience", "roles", "sensitive", "launch_date", "groups"):
+    for key in ("audience", "roles", "sensitive", "launch_date", "groups", "framework"):
         data.pop(key, None)
     assert employee.post("/api/applications", json=data).status_code == 200
     assert (

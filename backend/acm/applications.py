@@ -22,7 +22,7 @@ class ApplicationInput(BaseModel):
     contact: str = Field(min_length=1, max_length=254)
     environment: Literal["development", "test", "production"]
     app_type: Literal["backend", "spa", "mobile"]
-    framework: str = Field(min_length=1, max_length=300)
+    framework: str = Field(default="", max_length=300)
     access_url: str = Field(min_length=1, max_length=2048)
     redirect_uris: list[str] = Field(min_length=1, max_length=20)
     # Retained for decoding historical applications; no longer requested by the form.

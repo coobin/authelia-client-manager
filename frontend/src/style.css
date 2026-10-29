@@ -1094,3 +1094,9 @@ dd {
 }
 
 .required-mark { color: #b42318; font-weight: 700; }
+
+.application-domain { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.application-domain input { flex: 1; min-width: 100px; width: auto; }
+.application-domain span { overflow-wrap: anywhere; }
+.application-address-preview { background: #f0f5fa; padding: 12px 18px; border-radius: 8px; margin-bottom: 20px; overflow-wrap: anywhere; }
+.application-address-preview p { margin: 6px 0; }

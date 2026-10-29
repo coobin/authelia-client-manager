@@ -50,7 +50,7 @@ administrator access or links to an existing administrator by email.
 ## Workflow
 
 1. The applicant submits an application for one environment. Required details
-   include owners, department, technical contact, application type, framework,
+   include owners, department, technical contact and application type,
    access URL and exact callback URLs. All required fields are marked with an asterisk.
    Callback paths depend on the application OIDC component; no universal path is inferred.
    Production URLs require HTTPS. Web SPA and mobile applications are public
@@ -113,3 +113,13 @@ Never add QA login routes, test sessions, or test applications to production.
 `tests/test_applications.py` covers ownership, review races, concurrent claims,
 scope restrictions, public clients, reissue, CSRF and rollback behavior.
 `tests/test_oidc.py` covers browser binding, replay, PKCE and invalid ID tokens.
+
+## Simplified application addresses
+
+Set `ACM_APPLICATION_DOMAIN` in the private deployment environment to offer a
+subdomain field. Entering `oa` under `apps.example.com` previews and submits
+`https://oa.apps.example.com` and `https://oa.apps.example.com/auth/callback`.
+The application must implement that callback route. Custom address mode accepts
+existing routes and multiple callbacks. Editing historical custom addresses
+preserves them. With no configured suffix, the form uses custom addresses.
+Framework/component information is no longer requested; historical values remain readable by the backend.
