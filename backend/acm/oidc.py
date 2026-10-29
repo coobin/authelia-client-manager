@@ -33,7 +33,12 @@ def install_oidc(app, storage, origin, secure, session_response):
             data = r.json()
         if data.get("issuer") != issuer:
             raise ValueError("Issuer mismatch")
-        for key in ("authorization_endpoint", "token_endpoint", "jwks_uri"):
+        for key in (
+            "authorization_endpoint",
+            "token_endpoint",
+            "jwks_uri",
+            "userinfo_endpoint",
+        ):
             u = urlsplit(data[key])
             if (
                 u.scheme != "https"
@@ -144,7 +149,8 @@ def install_oidc(app, storage, origin, secure, session_response):
                     },
                 )
                 token.raise_for_status()
-                encoded = token.json()["id_token"]
+                tokens = token.json()
+                encoded = tokens["id_token"]
                 header = jwt.get_unverified_header(encoded)
                 if header.get("alg") not in (
                     "RS256",
@@ -187,6 +193,25 @@ def install_oidc(app, storage, origin, secure, session_response):
                 )
             ):
                 raise ValueError("Invalid identity")
+            # Profile claims may only be present at UserInfo. Bind them to the verified subject.
+            with httpx.Client(timeout=15, trust_env=False) as client:
+                profile_response = client.get(
+                    config["userinfo_endpoint"],
+                    headers={"Authorization": "Bearer " + tokens["access_token"]},
+                )
+                profile_response.raise_for_status()
+                profile = profile_response.json()
+            if profile.get("sub") != claims["sub"]:
+                raise ValueError("UserInfo subject mismatch")
+            claims.update(
+                {
+                    k: v
+                    for k, v in profile.items()
+                    if k in ("name", "preferred_username", "email")
+                    and isinstance(v, str)
+                    and v.strip()
+                }
+            )
             username = "oidc:" + digest((issuer + "\0" + claims["sub"]).encode())
             name = str(
                 claims.get("name") or claims.get("preferred_username") or "员工"

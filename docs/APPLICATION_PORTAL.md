@@ -39,7 +39,9 @@ rotation does not require a manager restart. State is stored server-side,
 expires after ten minutes, and is bound to a temporary HttpOnly browser cookie.
 The callback validates state, PKCE, signature, issuer, audience, nonce, expiry,
 issued-at and authorized party. Raw tokens and authorization codes are not
-persisted. Keep HTTP access logs disabled or redact callback queries.
+persisted. UserInfo is fetched over HTTPS and its subject must match the verified
+ID token before profile claims are used. Existing employees must sign in again to refresh their name.
+Keep HTTP access logs disabled or redact callback queries.
 
 An identity is associated by issuer and subject, never by email or display name.
 Its account is assigned only the applicant role. Employee login never grants
@@ -49,12 +51,13 @@ administrator access or links to an existing administrator by email.
 
 1. The applicant submits an application for one environment. Required details
    include owners, department, technical contact, application type, framework,
-   access URL, exact callback URLs, intended users, roles and sensitive operations.
+   access URL and exact callback URLs. All required fields are marked with an asterisk.
+   Callback paths depend on the application OIDC component; no universal path is inferred.
    Production URLs require HTTPS. Web SPA and mobile applications are public
    clients and receive no client secret.
 2. An administrator approves, returns for more information, or rejects the
-   application. Returns and rejections require a reason. Requested department
-   scope can be removed, but additional unrequested scope cannot be added.
+   application. Returns and rejections require a reason. Department scope is currently unavailable for new or resubmitted applications and approvals.
+   Historical registrations and stored application fields remain readable.
    The administrator can require two-factor authentication.
 3. Approval freezes the reviewed configuration. Publication is a separate
    deliberate action requiring recent administrator password/TOTP verification

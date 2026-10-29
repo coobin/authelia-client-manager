@@ -13,15 +13,13 @@ const envs: Record<string, string> = { development: "开发", test: "测试", pr
 const defaults = {
   name: "", purpose: "", department: "", business_owner: "", technical_owner: "",
   contact: "", environment: "test", app_type: "backend", framework: "",
-  access_url: "", redirect_uris: [""], audience: "", roles: "", groups: false,
-  sensitive: "无", launch_date: "", agreement: false,
+  access_url: "", redirect_uris: [""], agreement: false,
 };
 const fields: [string, string, string?][] = [
   ["name", "应用名称"], ["purpose", "应用用途", "area"], ["department", "申请部门"],
   ["business_owner", "业务负责人"], ["technical_owner", "技术负责人"],
   ["contact", "联系方式"], ["framework", "开发框架及 OIDC 组件"],
-  ["access_url", "应用访问地址", "url"], ["audience", "使用人群及访问限制", "area"],
-  ["roles", "业务角色及管理员授权方式", "area"], ["sensitive", "敏感业务说明，无则填“无”", "area"],
+  ["access_url", "应用访问地址", "url"],
 ];
 
 function ApplicationForm({ initial, onSave, onCancel, busy }: {
@@ -31,39 +29,38 @@ function ApplicationForm({ initial, onSave, onCancel, busy }: {
   const update = (key: string, value: any) => setData((d: any) => ({ ...d, [key]: value }));
   return <form className="application-form" onSubmit={e => {
     e.preventDefault();
-    onSave({ ...data, redirect_uris: data.redirect_uris.map((x: string) => x.trim()).filter(Boolean) });
+    onSave({ ...Object.fromEntries(Object.keys(defaults).map(key => [key, data[key]])), redirect_uris: data.redirect_uris.map((x: string) => x.trim()).filter(Boolean) });
   }}>
     <h2>{initial?.name ? "补充申请资料" : "申请应用接入"}</h2>
-    <p className="muted">每个应用、每个环境独立申请。提交后可在这里查看审批进度、领取接入参数和密钥。</p>
+    <p className="muted">每个应用、每个环境独立申请。提交后可在这里查看审批进度、领取接入参数和密钥。带 * 的为必填项。</p>
     <div className="application-fields">
       {fields.map(([key, label, type]) => <label key={key} className={type === "area" ? "wide" : ""}>
-        {label}
+        <span>{label}<span className="required-mark" aria-hidden="true"> *</span></span>
         {type === "area"
           ? <textarea required maxLength={2000} rows={3} value={data[key]} onChange={e => update(key, e.target.value)} />
           : <input required type={type || "text"} maxLength={key === "access_url" ? 2048 : 150}
                    value={data[key]} onChange={e => update(key, e.target.value)} />}
       </label>)}
-      <label>接入环境<select value={data.environment} onChange={e => update("environment", e.target.value)}>
+      <label><span>接入环境<span className="required-mark" aria-hidden="true"> *</span></span><select required value={data.environment} onChange={e => update("environment", e.target.value)}>
         {Object.entries(envs).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
       </select></label>
-      <label>应用类型<select value={data.app_type} onChange={e => update("app_type", e.target.value)}>
+      <label><span>应用类型<span className="required-mark" aria-hidden="true"> *</span></span><select required value={data.app_type} onChange={e => update("app_type", e.target.value)}>
         <option value="backend">有后端的 Web 系统</option><option value="spa">纯前端应用</option><option value="mobile">移动应用</option>
       </select><small>{data.app_type === "backend" ? "密钥仅保存在服务端。" : "公共客户端使用 PKCE，不分配客户端密钥。"}</small></label>
-      <label className="wide">完整登录回调地址
+      <label className="wide"><span>登录回调地址<span className="required-mark" aria-hidden="true"> *</span></span>
         <textarea required rows={3} value={data.redirect_uris.join("\n")}
           onChange={e => update("redirect_uris", e.target.value.split("\n"))}
-          placeholder="每行一个完整地址，生产环境必须使用 HTTPS" />
+          placeholder="例如：https://app.example.com/auth/callback（仅示例，请以应用组件配置为准）" />
+        <small>没有统一的回调路径。请向开发人员获取应用 OIDC 组件的回调地址，填写完整网址（域名和路径），每行一个。它通常不是应用首页；必须与应用配置完全一致，生产环境使用 HTTPS。</small>
       </label>
-      <label>期望上线日期（可选）<input type="date" value={data.launch_date} onChange={e => update("launch_date", e.target.value)} /></label>
-      <label className="check"><input type="checkbox" checked={data.groups} onChange={e => update("groups", e.target.checked)} />需要部门资料 groups</label>
     </div>
     <details className="application-rules"><summary>统一认证接入要求</summary>
       <p>使用授权码流程和 PKCE S256；通过成熟 OIDC 组件校验 state、nonce、签名、Issuer、Audience 和令牌有效期。以 Issuer 与 sub 关联用户。</p>
-      <p>应用负责业务权限，登录成功不自动授予管理员权限；部门资料不能直接等同管理员权限。密钥仅存服务端，不放前端、Git、日志或申请内容。</p>
+      <p>应用负责业务权限，登录成功不自动授予管理员权限。密钥仅存服务端，不放前端、Git、日志或申请内容。</p>
       <p>生产使用 HTTPS。上线前验证登录、权限、员工停用、退出及故障处理。变更回调、权限、负责人或应用下线时联系认证管理员。</p>
     </details>
     <label className="check"><input required type="checkbox" checked={data.agreement}
-      onChange={e => update("agreement", e.target.checked)} />我已阅读接入要求，确认资料准确，并配合接入验收</label>
+      onChange={e => update("agreement", e.target.checked)} />我已阅读接入要求，确认资料准确，并配合接入验收<span className="required-mark" aria-hidden="true"> *</span></label>
     <div className="application-actions"><button type="button" onClick={onCancel} disabled={busy}>取消</button>
       <button className="primary" disabled={busy}>{busy ? "正在提交…" : "提交申请"}</button></div>
   </form>;
@@ -79,7 +76,7 @@ export function ApplicationPanel({ api, admin = false, me }: { api: Api; admin?:
   const [list, setList] = useState<any[]>([]), [detail, setDetail] = useState<any>(null);
   const [editing, setEditing] = useState(false), [error, setError] = useState(""), [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false), [secret, setSecret] = useState("");
-  const [comment, setComment] = useState(""), [groups, setGroups] = useState(false), [twoFactor, setTwoFactor] = useState(false);
+  const [comment, setComment] = useState(""), [twoFactor, setTwoFactor] = useState(false);
   const [ack, setAck] = useState(false), [results, setResults] = useState("");
   const [reauth, setReauth] = useState(false), [password, setPassword] = useState(""), [code, setCode] = useState("");
   async function load(id?: string) {
@@ -106,9 +103,9 @@ export function ApplicationPanel({ api, admin = false, me }: { api: Api; admin?:
     return () => { stopped = true; clearInterval(id); };
   }, [detail?.id, detail?.draft_id, editing]);
   async function select(id: string) {
-    setSecret(""); setAck(false); setComment(""); setGroups(false); setTwoFactor(false); setResults("");
+    setSecret(""); setAck(false); setComment(""); setTwoFactor(false); setResults("");
     const d = await api("/applications/" + id);
-    setDetail(d); setGroups(d.payload.groups); setResults(d.acceptance || "");
+    setDetail(d); setResults(d.acceptance || "");
   }
   async function action(path: string, body: any) {
     await api(`/applications/${detail.id}/${path}`, body);
@@ -148,17 +145,15 @@ export function ApplicationPanel({ api, admin = false, me }: { api: Api; admin?:
           <dt>应用类型</dt><dd>{{ backend: "有后端的 Web 系统", spa: "纯前端", mobile: "移动应用" }[detail.payload.app_type as string]}</dd>
           <dt>登录回调地址</dt><dd>{detail.payload.redirect_uris.join("\n")}</dd>
           <dt>资料范围</dt><dd>openid profile email{detail.payload.groups ? " groups" : ""}</dd>
-          <dt>期望上线日期</dt><dd>{detail.payload.launch_date || "未指定"}</dd>
         </dl>
         {detail.comment && <div className="banner"><strong>审批意见：</strong>{detail.comment}</div>}
         {!admin && detail.status === "returned" && <button className="primary" disabled={busy} onClick={() => setEditing(true)}>补充资料并重新提交</button>}
         {admin && detail.status === "submitted" && <div className="application-review">
           <h3>审批意见</h3><label>办理说明<textarea rows={3} maxLength={2000} value={comment} onChange={e => setComment(e.target.value)} placeholder="退回或拒绝时必填" /></label>
-          {detail.payload.groups && <label className="check"><input type="checkbox" checked={groups} onChange={e => setGroups(e.target.checked)} />批准部门资料 groups</label>}
           <label className="check"><input type="checkbox" checked={twoFactor} onChange={e => setTwoFactor(e.target.checked)} />要求双因素认证</label>
           <div className="application-actions">{[["return", "退回补充"], ["reject", "不同意"], ["approve", "批准接入"]].map(([decision, title]) =>
             <button key={decision} className={decision === "approve" ? "primary" : ""} disabled={busy}
-              onClick={() => run(() => action("review", { version: detail.version, decision, comment, groups, two_factor: twoFactor }))}>{title}</button>)}</div>
+              onClick={() => run(() => action("review", { version: detail.version, decision, comment, two_factor: twoFactor }))}>{title}</button>)}</div>
         </div>}
         {detail.approved && <section className="application-review">
           <h3>批准的接入配置</h3>

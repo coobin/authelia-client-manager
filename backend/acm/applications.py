@@ -25,10 +25,11 @@ class ApplicationInput(BaseModel):
     framework: str = Field(min_length=1, max_length=300)
     access_url: str = Field(min_length=1, max_length=2048)
     redirect_uris: list[str] = Field(min_length=1, max_length=20)
-    audience: str = Field(min_length=1, max_length=2000)
-    roles: str = Field(min_length=1, max_length=2000)
+    # Retained for decoding historical applications; no longer requested by the form.
+    audience: str = Field(default="", max_length=2000)
+    roles: str = Field(default="", max_length=2000)
     groups: bool = False
-    sensitive: str = Field(min_length=1, max_length=2000)
+    sensitive: str = Field(default="", max_length=2000)
     launch_date: str = Field(
         default="", max_length=10, pattern=r"^(?:|\d{4}-\d{2}-\d{2})$"
     )
@@ -213,6 +214,8 @@ def install_applications(app, s, a, current, admin, fresh):
 
     @app.post("/api/applications")
     def create(body: ApplicationInput, u=Depends(current)):
+        if body.groups:
+            raise HTTPException(422, "暂不提供部门资料")
         if u["role"] not in ("applicant", "admin"):
             raise HTTPException(403, "需要申请人权限")
         if not s.limit("application:" + u["username"], maximum=20, window=3600):
@@ -249,6 +252,8 @@ def install_applications(app, s, a, current, admin, fresh):
 
     @app.post("/api/applications/{aid}/resubmit")
     def resubmit(aid: str, body: Resubmit, u=Depends(current)):
+        if body.groups:
+            raise HTTPException(422, "暂不提供部门资料")
         with s.connect() as c:
             c.execute("BEGIN IMMEDIATE")
             r = row(c, aid, u)
@@ -267,6 +272,8 @@ def install_applications(app, s, a, current, admin, fresh):
 
     @app.post("/api/applications/{aid}/review")
     def review(aid: str, body: Review, u=Depends(admin)):
+        if body.groups:
+            raise HTTPException(422, "暂不提供部门资料")
         if body.decision != "approve" and not body.comment.strip():
             raise HTTPException(422, "请填写退回或拒绝原因")
         with s.connect() as c:

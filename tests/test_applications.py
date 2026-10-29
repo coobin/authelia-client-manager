@@ -48,7 +48,7 @@ def payload(**changes):
         "redirect_uris": ["https://app.example.com/callback"],
         "audience": "Employees",
         "roles": "Explicit administrator list",
-        "groups": True,
+        "groups": False,
         "sensitive": "No",
         "agreement": True,
         **changes,
@@ -73,7 +73,7 @@ def approve(admin, aid):
         json={
             "version": detail(admin, aid)["version"],
             "decision": "approve",
-            "groups": True,
+            "groups": False,
             "two_factor": True,
         },
     )
@@ -434,3 +434,15 @@ def test_external_credential_change_blocks_old_secret_delivery(system):
     cfg.write_text(cfg.read_text().replace(hashed, replacement))
     assert detail(employee, aid)["status"] == "attention"
     assert employee.post(f"/api/applications/{aid}/claim", json={}).status_code == 409
+
+
+def test_simplified_form_and_unavailable_department_scope(system):
+    employee = applicant(system)
+    data = payload()
+    for key in ("audience", "roles", "sensitive", "launch_date", "groups"):
+        data.pop(key, None)
+    assert employee.post("/api/applications", json=data).status_code == 200
+    assert (
+        employee.post("/api/applications", json={**data, "groups": True}).status_code
+        == 422
+    )

@@ -51,7 +51,10 @@ def oidc(system, tmp_path, monkeypatch):
         def __exit__(self, *args):
             pass
 
-        def get(self, url):
+        def get(self, url, headers=None):
+            if url == "https://auth.example.com/userinfo":
+                assert headers == {"Authorization": "Bearer test-token"}
+                return Response(state.get("profile", {"sub": "employee-sub"}))
             if url.endswith("openid-configuration"):
                 return Response(
                     {
@@ -59,6 +62,7 @@ def oidc(system, tmp_path, monkeypatch):
                         "authorization_endpoint": "https://auth.example.com/authorize",
                         "token_endpoint": "https://auth.example.com/token",
                         "jwks_uri": "https://auth.example.com/jwks",
+                        "userinfo_endpoint": "https://auth.example.com/userinfo",
                     }
                 )
             assert url == "https://auth.example.com/jwks"
@@ -189,3 +193,27 @@ def test_expired_or_cancelled_login(oidc, system):
         == "/apply?login=failed"
     )
     assert calls == []
+
+
+def test_name_from_userinfo(oidc):
+    c, state, _ = oidc
+    callback = start(oidc)
+    state["overrides"] = {"name": None, "email": None}
+    state["profile"] = {
+        "sub": "employee-sub",
+        "name": "Profile Employee",
+        "email": "profile@example.com",
+    }
+    assert c.get(callback, follow_redirects=False).headers["location"] == "/apply"
+    assert c.get("/api/me").json()["name"] == "Profile Employee"
+
+
+def test_userinfo_subject_mismatch_rejected(oidc):
+    c, state, _ = oidc
+    callback = start(oidc)
+    state["profile"] = {"sub": "other-person", "name": "Wrong Person"}
+    assert (
+        c.get(callback, follow_redirects=False).headers["location"]
+        == "/apply?login=failed"
+    )
+    assert c.get("/api/me").status_code == 401
