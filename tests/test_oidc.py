@@ -128,13 +128,13 @@ def test_employee_login_pkce_identity_and_one_time_state(oidc):
     callback = start(oidc)
     assert state["code_challenge_method"] == "S256"
     r = c.get(callback, follow_redirects=False)
-    assert r.status_code == 303 and r.headers["location"] == "/apply"
+    assert r.status_code == 303 and r.headers["location"] == "/"
     me = c.get("/api/me").json()
     assert me["role"] == "applicant" and me["name"] == "Example Employee"
     assert len(calls) == 1
     assert (
         c.get(callback, follow_redirects=False).headers["location"]
-        == "/apply?login=failed"
+        == "/?login=failed"
     )
     assert len(calls) == 1
     assert "test-token" not in json.dumps(me)
@@ -159,7 +159,7 @@ def test_invalid_id_token_rejected(oidc, overrides):
     callback = start(oidc)
     state["overrides"] = overrides
     r = c.get(callback, follow_redirects=False)
-    assert r.headers["location"] == "/apply?login=failed"
+    assert r.headers["location"] == "/?login=failed"
     assert c.get("/api/me").status_code == 401
 
 
@@ -169,10 +169,10 @@ def test_callback_bound_to_initiating_browser(oidc):
     other = TestClient(c.app)
     assert (
         other.get(callback, follow_redirects=False).headers["location"]
-        == "/apply?login=failed"
+        == "/?login=failed"
     )
     assert calls == []
-    assert c.get(callback, follow_redirects=False).headers["location"] == "/apply"
+    assert c.get(callback, follow_redirects=False).headers["location"] == "/"
 
 
 def test_expired_or_cancelled_login(oidc, system):
@@ -182,7 +182,7 @@ def test_expired_or_cancelled_login(oidc, system):
         db.execute("UPDATE oidc_states SET expires=0")
     assert (
         c.get(callback, follow_redirects=False).headers["location"]
-        == "/apply?login=failed"
+        == "/?login=failed"
     )
     callback = start(oidc)
     assert (
@@ -190,7 +190,7 @@ def test_expired_or_cancelled_login(oidc, system):
             callback.replace("code=test-code", "error=access_denied"),
             follow_redirects=False,
         ).headers["location"]
-        == "/apply?login=failed"
+        == "/?login=failed"
     )
     assert calls == []
 
@@ -204,7 +204,7 @@ def test_name_from_userinfo(oidc):
         "name": "Profile Employee",
         "email": "profile@example.com",
     }
-    assert c.get(callback, follow_redirects=False).headers["location"] == "/apply"
+    assert c.get(callback, follow_redirects=False).headers["location"] == "/"
     assert c.get("/api/me").json()["name"] == "Profile Employee"
 
 
@@ -214,6 +214,6 @@ def test_userinfo_subject_mismatch_rejected(oidc):
     state["profile"] = {"sub": "other-person", "name": "Wrong Person"}
     assert (
         c.get(callback, follow_redirects=False).headers["location"]
-        == "/apply?login=failed"
+        == "/?login=failed"
     )
     assert c.get("/api/me").status_code == 401

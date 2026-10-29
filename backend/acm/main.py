@@ -425,7 +425,7 @@ def create_app(storage=None, agent=None, *, origin=None, secure=None, static=Non
 
     @app.get("/api/health")
     def health():
-        return {"status": "ok", "version": "0.2.3"}
+        return {"status": "ok", "version": "0.2.4"}
 
     @app.post("/api/login")
     def login(body: Login, req: Request):
@@ -738,6 +738,8 @@ def create_app(storage=None, agent=None, *, origin=None, secure=None, static=Non
         raise HTTPException(503, "请先构建前端资源")
 
     @app.get("/apply")
+    @app.get("/admin")
+    @app.get("/admin/")
     @app.get("/")
     def index():
         if (static / "index.html").exists():

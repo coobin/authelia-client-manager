@@ -1,6 +1,8 @@
 """Application, review and credential delivery workflow."""
 
 import json
+import os
+import re
 from typing import Literal
 from urllib.parse import urlsplit
 from uuid import uuid4
@@ -84,7 +86,7 @@ class Revision(BaseModel):
 class Review(Revision):
     decision: Literal["approve", "return", "reject"]
     comment: str = Field(default="", max_length=2000)
-    groups: bool = False
+    groups: bool = True
     two_factor: bool = False
 
 
@@ -212,10 +214,27 @@ def install_applications(app, s, a, current, admin, fresh):
             out.append(d)
         return out
 
+    def prepare_submission(body):
+        domain = os.getenv("ACM_APPLICATION_DOMAIN", "").strip().lower()
+        if not domain:
+            raise HTTPException(503, "应用域名尚未配置，请联系认证管理员")
+        host = urlsplit(body.access_url).hostname or ""
+        suffix = "." + domain
+        label = host[: -len(suffix)] if host.endswith(suffix) else ""
+        if (
+            not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label)
+            or body.access_url != "https://" + label + suffix
+            or body.redirect_uris != [body.access_url + "/auth/callback"]
+        ):
+            raise HTTPException(
+                422,
+                "请填写应用子域名，使用系统生成的访问地址和 /auth/callback 回调地址",
+            )
+        body.groups = True
+
     @app.post("/api/applications")
     def create(body: ApplicationInput, u=Depends(current)):
-        if body.groups:
-            raise HTTPException(422, "暂不提供部门资料")
+        prepare_submission(body)
         if u["role"] not in ("applicant", "admin"):
             raise HTTPException(403, "需要申请人权限")
         if not s.limit("application:" + u["username"], maximum=20, window=3600):
@@ -252,8 +271,7 @@ def install_applications(app, s, a, current, admin, fresh):
 
     @app.post("/api/applications/{aid}/resubmit")
     def resubmit(aid: str, body: Resubmit, u=Depends(current)):
-        if body.groups:
-            raise HTTPException(422, "暂不提供部门资料")
+        prepare_submission(body)
         with s.connect() as c:
             c.execute("BEGIN IMMEDIATE")
             r = row(c, aid, u)
@@ -272,8 +290,6 @@ def install_applications(app, s, a, current, admin, fresh):
 
     @app.post("/api/applications/{aid}/review")
     def review(aid: str, body: Review, u=Depends(admin)):
-        if body.groups:
-            raise HTTPException(422, "暂不提供部门资料")
         if body.decision != "approve" and not body.comment.strip():
             raise HTTPException(422, "请填写退回或拒绝原因")
         with s.connect() as c:
@@ -283,8 +299,6 @@ def install_applications(app, s, a, current, admin, fresh):
             if r["status"] != "submitted":
                 raise HTTPException(409, "该申请已处理，请刷新")
             payload = ApplicationInput.model_validate_json(r["payload"])
-            if body.groups and not payload.groups:
-                raise HTTPException(422, "申请未要求部门资料，不能扩大批准范围")
             client = payload.client("app-" + aid + "-" + payload.environment)
             client.scopes = ["openid", "profile", "email"] + (
                 ["groups"] if body.groups else []

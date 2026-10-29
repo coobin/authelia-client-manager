@@ -37,16 +37,17 @@ function ApplicationForm({ initial, onSave, onCancel, busy, domain }: {
     } catch { return ""; }
   })();
   const [subdomain, setSubdomain] = useState(initialHost);
-  const [custom, setCustom] = useState(!domain || (!!initial?.access_url && !initialHost));
   const accessUrl = subdomain ? `https://${subdomain}.${domain}` : "";
   const callbackUrl = accessUrl ? accessUrl + "/auth/callback" : "";
   const update = (key: string, value: any) => setData((d: any) => ({ ...d, [key]: value }));
   return <form className="application-form" onSubmit={e => {
     e.preventDefault();
-    onSave({ ...Object.fromEntries(Object.keys(defaults).map(key => [key, data[key]])), access_url: custom ? data.access_url : accessUrl, redirect_uris: custom ? data.redirect_uris.map((x: string) => x.trim()).filter(Boolean) : [callbackUrl] });
+    if (!domain) return;
+    onSave({ ...Object.fromEntries(Object.keys(defaults).map(key => [key, data[key]])), access_url: accessUrl, redirect_uris: [callbackUrl] });
   }}>
     <h2>{initial?.name ? "补充申请资料" : "申请应用接入"}</h2>
     <p className="muted">每个应用、每个环境独立申请。提交后可在这里查看审批进度、领取接入参数和密钥。带 * 的为必填项。</p>
+    {!domain && <p className="error" role="alert">应用域名尚未配置，请联系认证管理员。</p>}
     <div className="application-fields">
       {fields.map(([key, label, type]) => <label key={key} className={type === "area" ? "wide" : ""}>
         <span>{label}<span className="required-mark" aria-hidden="true"> *</span></span>
@@ -61,30 +62,15 @@ function ApplicationForm({ initial, onSave, onCancel, busy, domain }: {
       <label><span>应用类型<span className="required-mark" aria-hidden="true"> *</span></span><select required value={data.app_type} onChange={e => update("app_type", e.target.value)}>
         <option value="backend">有后端的 Web 系统</option><option value="spa">纯前端应用</option><option value="mobile">移动应用</option>
       </select><small>{data.app_type === "backend" ? "密钥仅保存在服务端。" : "公共客户端使用 PKCE，不分配客户端密钥。"}</small></label>
-      {domain && <label className="check wide"><input type="checkbox" checked={custom} onChange={e => {
-        if (e.target.checked && accessUrl) setData((d: any) => ({ ...d, access_url: accessUrl, redirect_uris: [callbackUrl] }));
-        setCustom(e.target.checked);
-      }} />自定义地址</label>}
-      {!custom ? <>
         <label className="wide"><span>应用子域名<span className="required-mark" aria-hidden="true"> *</span></span>
           <div className="application-domain"><span>https://</span><input required aria-label="应用子域名" autoCapitalize="none" autoCorrect="off" spellCheck={false}
-            pattern={"[a-z0-9]([a-z0-9\\-]{0,61}[a-z0-9])?"} maxLength={63} placeholder="例如：oa" value={subdomain}
+            pattern={"[a-z0-9]([a-z0-9\\-]{0,61}[a-z0-9])?"} maxLength={63} placeholder="例如：test" value={subdomain}
             onChange={e => setSubdomain(e.target.value.toLowerCase())} title="只填写子域名，可用小写字母、数字和中间的短横线" /><span>.{domain}</span></div>
-          <small>只填写子域名，例如 oa；应用需支持 /auth/callback 回调路径。已有应用使用其他地址时，选择“自定义地址”。</small>
+          <small>只填写子域名，例如 test；应用需支持 /auth/callback 回调路径。</small>
         </label>
         <div className="application-address-preview wide" aria-live="polite"><p>应用访问地址：<strong>{accessUrl || "填写子域名后自动生成"}</strong></p>
           <p>登录回调地址：<strong>{callbackUrl || "填写子域名后自动生成"}</strong></p></div>
-      </> : <>
-        <label className="wide"><span>应用访问地址<span className="required-mark" aria-hidden="true"> *</span></span>
-          <input required type="url" maxLength={2048} value={data.access_url} onChange={e => update("access_url", e.target.value)} placeholder="https://app.example.com" />
-          <small>员工平时打开应用的完整网址。</small>
-        </label>
-        <label className="wide"><span>登录回调地址<span className="required-mark" aria-hidden="true"> *</span></span>
-          <textarea required rows={3} value={data.redirect_uris.join("\n")} onChange={e => update("redirect_uris", e.target.value.split("\n"))}
-            placeholder="每行一个完整回调地址" />
-          <small>以应用登录组件的实际配置为准，必须完全一致，不支持通配符；生产环境使用 HTTPS。</small>
-        </label>
-      </>}
+
     </div>
     <details className="application-rules"><summary>统一认证接入要求</summary>
       <p>使用授权码流程和 PKCE S256；通过成熟 OIDC 组件校验 state、nonce、签名、Issuer、Audience 和令牌有效期。以 Issuer 与 sub 关联用户。</p>
@@ -94,7 +80,7 @@ function ApplicationForm({ initial, onSave, onCancel, busy, domain }: {
     <label className="check"><input required type="checkbox" checked={data.agreement}
       onChange={e => update("agreement", e.target.checked)} />我已阅读接入要求，确认资料准确，并配合接入验收<span className="required-mark" aria-hidden="true"> *</span></label>
     <div className="application-actions"><button type="button" onClick={onCancel} disabled={busy}>取消</button>
-      <button className="primary" disabled={busy}>{busy ? "正在提交…" : "提交申请"}</button></div>
+      <button className="primary" disabled={busy || !domain}>{busy ? "正在提交…" : "提交申请"}</button></div>
   </form>;
 }
 
@@ -253,12 +239,12 @@ export function ApplicantPortal() {
       setDomain(auth.application_domain || ""); setEnabled(auth.enabled); setMe(user); setCsrf(user?.csrf || "");
     }).catch(e => setError(e.message)).finally(() => setReady(true));
   }, []);
-  return <div className="applicant-page"><header className="applicant-header"><a href="/apply"><KeyRound size={25} /><strong>统一认证接入</strong></a>
+  return <div className="applicant-page"><header className="applicant-header"><a href="/"><KeyRound size={25} /><strong>统一认证接入</strong></a>
     <div>{me ? <><span>{me.name || me.username}</span><button onClick={async () => {
       try { await api("/logout", {}); setMe(null); setCsrf(""); } catch (e: any) { setError(e.message); }
     }}><LogOut size={16} />退出</button></> : null}</div></header>
     <main className="applicant-content">{!ready ? <p>正在打开申请入口…</p> : me ? <>
-      {me.role === "admin" && <div className="banner">当前以管理员身份查看申请入口。<a href="/">返回管理后台审批</a></div>}
+      {me.role === "admin" && <div className="banner">当前以管理员身份查看申请入口。<a href="/admin">返回管理后台审批</a></div>}
       <ApplicationPanel key={me.username} api={api} me={me} domain={domain} />
     </> : <section className="applicant-welcome"><ClipboardList size={42} /><h1>申请应用统一认证接入</h1>
       <p>用员工账号登录，提交应用接入资料。审批发布完成后，在这里领取接入参数和密钥，并完成联调验收。</p>

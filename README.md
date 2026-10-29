@@ -15,7 +15,7 @@ Initial release targeting **Authelia 4.39.1**, a single YAML configuration and a
 - Restart only the configured target, record durable outcomes and compensate failed deployments.
 - Browser-based first administrator setup, Argon2id passwords and optional TOTP, CSRF protection and audit records.
 - View and copy application connection parameters.
-- Employee OIDC login and a separate `/apply` portal for online applications,
+- Employee OIDC login and a separate `/` portal for online applications,
   returned submissions, administrator review, controlled publication and acceptance.
 - Applicant-bound one-time secret claims and administrator-controlled reissue;
   application credentials cannot be claimed through anonymous delivery links.
@@ -34,7 +34,7 @@ npm run build --prefix frontend
 ./scripts/demo.sh
 ```
 
-Open `http://localhost:8098` and choose your administrator account and password in the browser. TOTP is off by default; enable it under Settings when needed. The initial setup route closes after the first account is created. The `runtime` directory is ignored by Git and excluded from Docker builds.
+Open `http://localhost:8098/admin` and choose your administrator account and password in the browser. TOTP is off by default; enable it under Settings when needed. The initial setup route closes after the first account is created. The `runtime` directory is ignored by Git and excluded from Docker builds.
 
 ## Production deployment
 

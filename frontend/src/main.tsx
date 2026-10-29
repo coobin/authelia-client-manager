@@ -554,7 +554,7 @@ function App() {
         claimId={claimId}
         onExit={() => {
           setClaimId("");
-          window.history.pushState(null, "", "/");
+          window.history.pushState(null, "", "/admin");
         }}
       />
     );
@@ -680,14 +680,14 @@ function App() {
               ? "双因素认证默认关闭，可在设置中开启。"
               : "开启双因素认证的账户需要验证动态码。"}
           </small>
-          {!setupRequired && <a href="/apply">应用接入申请入口</a>}
+          {!setupRequired && <a href="/">应用接入申请入口</a>}
         </form>
       </main>
     );
   return (
     <div className="shell">
       <aside className="sidebar">
-        <a className="brand" href="/">
+        <a className="brand" href="/admin">
           <KeyRound />
           <strong>
             统一认证<span>应用管理</span>
@@ -775,7 +775,7 @@ function App() {
             </h1>
           </div>
           <div className="header-actions">
-            {admin && <a href="/apply">接入申请入口</a>}
+            {admin && <a href="/">接入申请入口</a>}
             <button title="刷新" onClick={() => run(refresh)}>
               <RefreshCw size={17} />
             </button>
@@ -1743,5 +1743,5 @@ function Modal({
   );
 }
 createRoot(document.getElementById("root")!).render(
-  window.location.pathname === "/apply" ? <ApplicantPortal /> : <App />,
+  window.location.pathname.replace(/\/$/, "") === "/admin" || getInitialClaimId() ? <App /> : <ApplicantPortal />,
 );

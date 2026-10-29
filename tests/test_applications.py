@@ -8,6 +8,11 @@ from tests.test_api import system, login
 from tests.test_engine import wait
 
 
+@pytest.fixture(autouse=True)
+def application_domain(monkeypatch):
+    monkeypatch.setenv("ACM_APPLICATION_DOMAIN", "example.com")
+
+
 def applicant(system, name="employee"):
     c, s, *_ = system
     with s.connect() as db:
@@ -45,7 +50,7 @@ def payload(**changes):
         "app_type": "backend",
         "framework": "OIDC component",
         "access_url": "https://app.example.com",
-        "redirect_uris": ["https://app.example.com/callback"],
+        "redirect_uris": ["https://app.example.com/auth/callback"],
         "audience": "Employees",
         "roles": "Explicit administrator list",
         "groups": False,
@@ -73,7 +78,6 @@ def approve(admin, aid):
         json={
             "version": detail(admin, aid)["version"],
             "decision": "approve",
-            "groups": False,
             "two_factor": True,
         },
     )
@@ -232,23 +236,16 @@ def test_application_validation(system, change):
     )
 
 
-def test_public_client_has_no_secret_and_scopes_not_expanded(system):
+def test_public_client_has_no_secret_and_default_scopes(system):
     employee, admin = applicant(system), login(system)
     aid = create(employee, app_type="spa", groups=False)
-    assert (
-        admin.post(
-            f"/api/applications/{aid}/review",
-            json={"version": 1, "decision": "approve", "groups": True},
-        ).status_code
-        == 422
-    )
-    assert (
-        admin.post(
-            f"/api/applications/{aid}/review",
-            json={"version": 1, "decision": "approve"},
-        ).status_code
-        == 200
-    )
+    approve(admin, aid)
+    assert detail(admin, aid)["approved"]["scopes"] == [
+        "openid",
+        "profile",
+        "email",
+        "groups",
+    ]
     publish(admin, aid)
     wait(system[2])
     d = detail(employee, aid)
@@ -400,7 +397,8 @@ def test_reissue_after_pruned_history_and_reject_configuration_drift(system):
     cfg = system[2].config
     cfg.write_text(
         cfg.read_text().replace(
-            "https://app.example.com/callback", "https://app.example.com/new-callback"
+            "https://app.example.com/auth/callback",
+            "https://app.example.com/new-callback",
         )
     )
     d = detail(admin, aid)
@@ -436,13 +434,70 @@ def test_external_credential_change_blocks_old_secret_delivery(system):
     assert employee.post(f"/api/applications/{aid}/claim", json={}).status_code == 409
 
 
-def test_simplified_form_and_unavailable_department_scope(system):
+def test_simplified_form_and_default_scopes(system):
     employee = applicant(system)
     data = payload()
     for key in ("audience", "roles", "sensitive", "launch_date", "groups", "framework"):
         data.pop(key, None)
-    assert employee.post("/api/applications", json=data).status_code == 200
+    result = employee.post("/api/applications", json=data)
+    assert result.status_code == 200
+    aid = result.json()["id"]
+    assert detail(employee, aid)["payload"]["groups"] is True
+    admin = login(system)
+    approve(admin, aid)
+    assert detail(admin, aid)["approved"]["scopes"] == [
+        "openid",
+        "profile",
+        "email",
+        "groups",
+    ]
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"access_url": "https://other.test"},
+        {"access_url": "https://app.example.com/home"},
+        {"access_url": "https://nested.app.example.com"},
+        {"redirect_uris": ["https://app.example.com/other"]},
+        {
+            "redirect_uris": [
+                "https://app.example.com/auth/callback",
+                "https://app.example.com/extra",
+            ]
+        },
+    ],
+)
+def test_custom_application_addresses_rejected(system, changes):
+    employee = applicant(system)
     assert (
-        employee.post("/api/applications", json={**data, "groups": True}).status_code
-        == 422
+        employee.post("/api/applications", json=payload(**changes)).status_code == 422
     )
+
+
+def test_application_domain_required(system, monkeypatch):
+    monkeypatch.delenv("ACM_APPLICATION_DOMAIN", raising=False)
+    assert (
+        applicant(system).post("/api/applications", json=payload()).status_code == 503
+    )
+
+
+def test_custom_addresses_rejected_on_resubmit(system):
+    employee, admin = applicant(system), login(system)
+    aid = create(employee)
+    assert (
+        admin.post(
+            f"/api/applications/{aid}/review",
+            json={"version": 1, "decision": "return", "comment": "Update"},
+        ).status_code
+        == 200
+    )
+    result = employee.post(
+        f"/api/applications/{aid}/resubmit",
+        json={
+            **payload(redirect_uris=["https://app.example.com/custom"]),
+            "version": 2,
+        },
+    )
+    assert result.status_code == 422
+    assert detail(employee, aid)["status"] == "returned"

@@ -547,3 +547,14 @@ def test_missing_master_key_never_silently_replaced(tmp_path):
     with pytest.raises(RuntimeError):
         open_storage(tmp_path)
     assert not (tmp_path / "master.key").exists()
+
+
+def test_portal_admin_and_legacy_page_routes(system, tmp_path):
+    static = tmp_path / "static"
+    static.mkdir()
+    (static / "index.html").write_text("<html>manager-app</html>")
+    c = TestClient(create_app(system[1], system[0].app.state.agent, origin="http://testserver", secure=False, static=static))
+    for path in ("/", "/admin", "/admin/", "/apply", "/claim/" + "a" * 32):
+        response = c.get(path)
+        assert response.status_code == 200
+        assert "manager-app" in response.text

@@ -235,8 +235,8 @@ def install_oidc(app, storage, origin, secure, session_response):
             storage.audit(username, "employee-login")
             response = session_response(username)
             response.status_code = 303
-            response.headers["location"] = "/apply"
+            response.headers["location"] = "/"
         except Exception:
-            response = RedirectResponse("/apply?login=failed", status_code=303)
+            response = RedirectResponse("/?login=failed", status_code=303)
         response.delete_cookie("acm_oidc", path=cookie_path)
         return response

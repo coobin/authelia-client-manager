@@ -1,8 +1,8 @@
 # Online application portal
 
-Employees open `/apply`, sign in with the configured identity provider, submit
+Employees open `/` (the legacy `/apply` URL also works), sign in with the configured identity provider, submit
 application details, and follow review, publication and acceptance in one place.
-The administrator console remains at `/` with its existing independent login.
+The administrator console is at `/admin` with its existing independent login.
 The portal replaces the offline application form; the authentication integration
 requirements still apply.
 
@@ -52,11 +52,11 @@ administrator access or links to an existing administrator by email.
 1. The applicant submits an application for one environment. Required details
    include owners, department, technical contact and application type,
    access URL and exact callback URLs. All required fields are marked with an asterisk.
-   Callback paths depend on the application OIDC component; no universal path is inferred.
+   Addresses use the configured domain and the fixed `/auth/callback` path.
    Production URLs require HTTPS. Web SPA and mobile applications are public
    clients and receive no client secret.
 2. An administrator approves, returns for more information, or rejects the
-   application. Returns and rejections require a reason. Department scope is currently unavailable for new or resubmitted applications and approvals.
+   application. Returns and rejections require a reason. Current applications provide `openid profile email groups`.
    Historical registrations and stored application fields remain readable.
    The administrator can require two-factor authentication.
 3. Approval freezes the reviewed configuration. Publication is a separate
@@ -117,9 +117,10 @@ scope restrictions, public clients, reissue, CSRF and rollback behavior.
 ## Simplified application addresses
 
 Set `ACM_APPLICATION_DOMAIN` in the private deployment environment to offer a
-subdomain field. Entering `oa` under `apps.example.com` previews and submits
-`https://oa.apps.example.com` and `https://oa.apps.example.com/auth/callback`.
-The application must implement that callback route. Custom address mode accepts
-existing routes and multiple callbacks. Editing historical custom addresses
-preserves them. With no configured suffix, the form uses custom addresses.
-Framework/component information is no longer requested; historical values remain readable by the backend.
+subdomain field. Entering `test` under `apps.example.com` previews and submits
+`https://test.apps.example.com` and `https://test.apps.example.com/auth/callback`.
+The application must implement that callback route. New and resubmitted applications
+accept only these generated addresses, with a single DNS label and a single callback.
+A missing domain configuration prevents submission. Historical approved registrations
+remain unchanged; returned legacy applications must use the current address rules when resubmitted.
+Framework/component information is no longer requested.
