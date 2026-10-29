@@ -425,7 +425,7 @@ def create_app(storage=None, agent=None, *, origin=None, secure=None, static=Non
 
     @app.get("/api/health")
     def health():
-        return {"status": "ok", "version": "0.2.1"}
+        return {"status": "ok", "version": "0.2.2"}
 
     @app.post("/api/login")
     def login(body: Login, req: Request):

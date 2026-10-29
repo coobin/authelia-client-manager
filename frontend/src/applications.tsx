@@ -39,7 +39,9 @@ function ApplicationForm({ initial, onSave, onCancel, busy }: {
         {type === "area"
           ? <textarea required maxLength={2000} rows={3} value={data[key]} onChange={e => update(key, e.target.value)} />
           : <input required type={type || "text"} maxLength={key === "access_url" ? 2048 : 150}
-                   value={data[key]} onChange={e => update(key, e.target.value)} />}
+                   value={data[key]} placeholder={key === "framework" ? "例如：Spring Boot + Spring Security；不清楚可填“待开发确认”" : key === "access_url" ? "例如：https://app.example.com" : undefined} onChange={e => update(key, e.target.value)} />}
+        {key === "framework" && <small>应用用什么技术开发、用什么组件接入统一登录。请开发人员填写；不清楚可先填“待开发确认”。</small>}
+        {key === "access_url" && <small>员工平时打开这个应用的网址，填写完整的首页或入口地址；不是认证服务地址。</small>}
       </label>)}
       <label><span>接入环境<span className="required-mark" aria-hidden="true"> *</span></span><select required value={data.environment} onChange={e => update("environment", e.target.value)}>
         {Object.entries(envs).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
@@ -51,7 +53,7 @@ function ApplicationForm({ initial, onSave, onCancel, busy }: {
         <textarea required rows={3} value={data.redirect_uris.join("\n")}
           onChange={e => update("redirect_uris", e.target.value.split("\n"))}
           placeholder="例如：https://app.example.com/auth/callback（仅示例，请以应用组件配置为准）" />
-        <small>没有统一的回调路径。请向开发人员获取应用 OIDC 组件的回调地址，填写完整网址（域名和路径），每行一个。它通常不是应用首页；必须与应用配置完全一致，生产环境使用 HTTPS。</small>
+        <small>没有统一的回调路径。请向开发人员获取应用 OIDC 组件的回调地址，填写完整网址（域名和路径），每行一个，不支持 * 通配域名。可以约定回调路径为 /auth/callback，但应用必须实际支持该路径。它通常不是应用首页；必须与应用配置完全一致，生产环境使用 HTTPS。</small>
       </label>
     </div>
     <details className="application-rules"><summary>统一认证接入要求</summary>
@@ -222,7 +224,7 @@ export function ApplicantPortal() {
   return <div className="applicant-page"><header className="applicant-header"><a href="/apply"><KeyRound size={25} /><strong>统一认证接入</strong></a>
     <div>{me ? <><span>{me.name || me.username}</span><button onClick={async () => {
       try { await api("/logout", {}); setMe(null); setCsrf(""); } catch (e: any) { setError(e.message); }
-    }}><LogOut size={16} />退出</button></> : <a href="/">管理员入口</a>}</div></header>
+    }}><LogOut size={16} />退出</button></> : null}</div></header>
     <main className="applicant-content">{!ready ? <p>正在打开申请入口…</p> : me ? <>
       {me.role === "admin" && <div className="banner">当前以管理员身份查看申请入口。<a href="/">返回管理后台审批</a></div>}
       <ApplicationPanel key={me.username} api={api} me={me} />
