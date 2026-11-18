@@ -8,6 +8,7 @@ services:
       - "${ACM_BIND:-127.0.0.1}:8098:8098"
     environment:
       ACM_APPLICATION_DOMAIN: ${ACM_APPLICATION_DOMAIN:-}
+      ACM_APPLICATION_APPROVER: ${ACM_APPLICATION_APPROVER:-}
       ACM_DATA: /data
       ACM_AGENT_SOCKET: /run/acm/agent.sock
       ACM_ORIGIN: ${ACM_ORIGIN:-https://manager.example.com}

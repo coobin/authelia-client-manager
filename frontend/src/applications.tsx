@@ -91,12 +91,15 @@ function parameters(d: any) {
 }
 
 export function ApplicationPanel({ api, admin = false, me, domain = "" }: { api: Api; admin?: boolean; me: any; domain?: string }) {
-  const [list, setList] = useState<any[]>([]), [detail, setDetail] = useState<any>(null);
+  const [list, setList] = useState<any[] | null>(null), [detail, setDetail] = useState<any>(null);
   const [editing, setEditing] = useState(false), [error, setError] = useState(""), [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false), [secret, setSecret] = useState("");
   const [comment, setComment] = useState(""), [twoFactor, setTwoFactor] = useState(false);
   const [ack, setAck] = useState(false), [results, setResults] = useState("");
   const [reauth, setReauth] = useState(false), [password, setPassword] = useState(""), [code, setCode] = useState("");
+  const items = list || [];
+  const pending = admin ? items.filter(d => d.status === "submitted") : [];
+  const ordered = admin ? [...pending, ...items.filter(d => d.status !== "submitted")] : items;
   async function load(id?: string) {
     setList(await api("/applications"));
     if (id) setDetail(await api("/applications/" + id));
@@ -133,7 +136,7 @@ export function ApplicationPanel({ api, admin = false, me, domain = "" }: { api:
   }
   return <section className="applications">
     <div className="application-toolbar">
-      <div><h2>{admin ? "接入申请审批" : "我的接入申请"}</h2><p className="muted">{admin ? "核对申请资料，审批后发布，再由申请人领取凭据。" : "申请、审批、领取凭据和接入验收都在这里完成。"}</p></div>
+      <div><h2>{admin ? "接入申请审批" : "我的接入申请"}</h2><p className="muted">{admin ? <>当前审批账号：{me.username}{list && ` · 待审批 ${pending.length} 条`}</> : "申请、审批、领取凭据和接入验收都在这里完成。"}</p></div>
       <div className="application-actions">
         <button aria-label="刷新申请" disabled={busy} onClick={() => run(() => load(detail?.id))}><RefreshCw size={16} /></button>
         {!admin && !editing && <button className="primary" onClick={() => { setDetail(null); setSecret(""); setEditing(true); setError(""); }}><Plus size={16} />新建申请</button>}
@@ -214,8 +217,8 @@ export function ApplicationPanel({ api, admin = false, me, domain = "" }: { api:
         <section className="application-review"><h3>办理记录</h3><ol className="application-timeline">{detail.events.map((e: any, i: number) =>
           <li key={i}><time>{new Date(e.at * 1000).toLocaleString()}</time><strong>{states[e.action] || e.action}</strong>{admin && <small>{e.actor}</small>}{e.comment && <p>{e.comment}</p>}</li>)}</ol></section>
       </article>
-    </> : <div className="table-wrap"><table><thead><tr><th>应用</th><th>环境</th><th>技术负责人</th><th>进度</th><th>提交时间</th><th>操作</th></tr></thead>
-      <tbody>{list.length ? list.map(d => <tr key={d.id}><td><strong>{d.payload.name}</strong><small>{d.payload.department}</small></td><td>{envs[d.payload.environment]}</td><td>{d.payload.technical_owner}</td>
+    </> : !list ? (!error && <p className="muted">正在加载申请…</p>) : <div className="table-wrap"><table><thead><tr><th>应用</th><th>环境</th><th>技术负责人</th><th>进度</th><th>提交时间</th><th>操作</th></tr></thead>
+      <tbody>{ordered.length ? ordered.map(d => <tr key={d.id}><td><strong>{d.payload.name}</strong><small>{d.payload.department}</small></td><td>{envs[d.payload.environment]}</td><td>{d.payload.technical_owner}</td>
         <td><span className={"tag request-" + d.status}>{states[d.status] || d.status}</span></td><td>{new Date(d.created * 1000).toLocaleString()}</td><td><button disabled={busy} onClick={() => run(() => select(d.id))}>查看申请</button></td></tr>) :
         <tr><td colSpan={6} className="application-empty"><ClipboardList size={30} /><p>{admin ? "暂无待办理的接入申请" : "还没有接入申请，点击“新建申请”开始填写"}</p></td></tr>}</tbody></table></div>}
   </section>;
@@ -240,12 +243,11 @@ export function ApplicantPortal() {
     }).catch(e => setError(e.message)).finally(() => setReady(true));
   }, []);
   return <div className="applicant-page"><header className="applicant-header"><a href="/"><KeyRound size={25} /><strong>统一认证接入</strong></a>
-    <div>{me ? <><span>{me.name || me.username}</span><button onClick={async () => {
+      <div>{me ? <><span>{me.name || me.username}</span>{me.role === "admin" && <a href="/admin">管理后台</a>}<button onClick={async () => {
       try { await api("/logout", {}); setMe(null); setCsrf(""); } catch (e: any) { setError(e.message); }
     }}><LogOut size={16} />退出</button></> : null}</div></header>
     <main className="applicant-content">{!ready ? <p>正在打开申请入口…</p> : me ? <>
-      {me.role === "admin" && <div className="banner">当前以管理员身份查看申请入口。<a href="/admin">返回管理后台审批</a></div>}
-      <ApplicationPanel key={me.username} api={api} me={me} domain={domain} />
+      <ApplicationPanel key={me.username} api={api} admin={!!me.can_review_applications} me={me} domain={domain} />
     </> : <section className="applicant-welcome"><ClipboardList size={42} /><h1>申请应用统一认证接入</h1>
       <p>用员工账号登录，提交应用接入资料。审批发布完成后，在这里领取接入参数和密钥，并完成联调验收。</p>
       <ol><li>填写应用和权限需求</li><li>管理员审核并发布</li><li>领取凭据，完成接入验收</li></ol>

@@ -380,7 +380,7 @@ function App() {
     [notice, setNotice] = useState(""),
     [busy, setBusy] = useState(false);
   const [inv, setInv] = useState<Inventory | null>(null),
-    [tab, setTab] = useState("clients"),
+    [selectedTab, setTab] = useState<string | null>(null),
     [query, setQuery] = useState(""),
     [jobs, setJobs] = useState<any[]>([]),
     [drafts, setDrafts] = useState<any[]>([]),
@@ -401,6 +401,8 @@ function App() {
     [loginTotp, setLoginTotp] = useState(false);
   const [errorFields, setErrorFields] = useState<string[]>([]);
   const admin = me?.role === "admin";
+  const canReview = !!me?.can_review_applications;
+  const tab = selectedTab ?? (canReview ? "applications" : "clients");
   async function run(fn: () => Promise<void>) {
     setBusy(true);
     setError("");
@@ -696,7 +698,7 @@ function App() {
         <nav>
           {[
             ["clients", "应用登记", Layers],
-            ...(admin ? [["applications", "接入申请", ClipboardList]] : []),
+            ...(canReview ? [["applications", "接入申请审批", ClipboardList]] : []),
             ["drafts", "待发布", ClipboardList],
             ["jobs", "发布记录", History],
             ["audit", "操作记录", ShieldCheck],
@@ -733,6 +735,7 @@ function App() {
                 await api("/logout", {});
                 setMe(null);
                 setInv(null);
+                setTab(null);
               })
             }
           >
@@ -775,10 +778,10 @@ function App() {
             </h1>
           </div>
           <div className="header-actions">
-            {admin && <a href="/">接入申请入口</a>}
-            <button title="刷新" onClick={() => run(refresh)}>
+            {admin && <a href="/">{canReview ? "申请门户" : "接入申请入口"}</a>}
+            {tab !== "applications" && <button title="刷新" onClick={() => run(refresh)}>
               <RefreshCw size={17} />
-            </button>
+            </button>}
             {admin && (
               <button className="primary" onClick={() => open()}>
                 <Plus size={17} />
@@ -823,7 +826,7 @@ function App() {
             updated={async () => setMe(await api("/me"))}
           />
         )}
-        {tab === "applications" && admin && <ApplicationPanel api={api} admin me={me} />}
+        {tab === "applications" && canReview && <ApplicationPanel api={api} admin me={me} />}
         {tab === "clients" && (
           <>
             <div className="toolbar">

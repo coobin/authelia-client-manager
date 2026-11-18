@@ -249,10 +249,28 @@ def create_app(storage=None, agent=None, *, origin=None, secure=None, static=Non
             raise HTTPException(403, "需要管理后台权限")
         return u
 
-    def fresh(u=Depends(admin)):
+    def require_recent_auth(u):
         if u["reauth"] < now() - 300:
             raise HTTPException(403, "请先完成近期安全验证")
         return u
+
+    def fresh(u=Depends(admin)):
+        return require_recent_auth(u)
+
+    approver_username = os.getenv("ACM_APPLICATION_APPROVER", "").strip()
+
+    def can_review_applications(u):
+        return u["role"] == "admin" and (
+            not approver_username or u["username"] == approver_username
+        )
+
+    def application_approver(u=Depends(current)):
+        if not can_review_applications(u):
+            raise HTTPException(403, "仅指定的管理员可以办理接入申请")
+        return u
+
+    def fresh_application_approver(u=Depends(application_approver)):
+        return require_recent_auth(u)
 
     def verify(username, password, code=""):
         with s.connect() as c:
@@ -309,7 +327,15 @@ def create_app(storage=None, agent=None, *, origin=None, secure=None, static=Non
     from .oidc import install_oidc
     from .applications import install_applications
     install_oidc(app, s, origin, secure, session_response)
-    install_applications(app, s, a, current, admin, fresh)
+    install_applications(
+        app,
+        s,
+        a,
+        current,
+        can_review_applications,
+        application_approver,
+        fresh_application_approver,
+    )
 
     def application_delivery(c, did):
         return c.execute(
@@ -439,6 +465,7 @@ def create_app(storage=None, agent=None, *, origin=None, secure=None, static=Non
     @app.get("/api/me")
     def me(u=Depends(current)):
         result = {k: u[k] for k in ("username", "role", "csrf", "reauth", "totp_enabled")}
+        result["can_review_applications"] = can_review_applications(u)
         with s.connect() as c:
             profile = c.execute("SELECT name,email FROM applicants WHERE username=?", (u["username"],)).fetchone()
         if profile:

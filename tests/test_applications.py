@@ -4,7 +4,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from acm.common import now
-from tests.test_api import system, login
+from acm.main import create_app
+from tests.test_api import LocalAgent, system, login
 from tests.test_engine import wait
 
 
@@ -95,6 +96,42 @@ def publish(admin, aid, **extra):
     )
     assert r.status_code == 200, r.text
     return r.json()["id"]
+
+
+def test_designated_approver_applies_to_existing_and_new_requests(system, monkeypatch):
+    existing = create(applicant(system))
+    _, store, engine, seed, password = system
+    with store.connect() as db:
+        db.execute("UPDATE admins SET role='admin' WHERE username='reader'")
+    monkeypatch.setenv("ACM_APPLICATION_APPROVER", "admin")
+    app = create_app(store, LocalAgent(engine), origin="http://testserver", secure=False)
+
+    def staff(name):
+        client = TestClient(app, headers={"Origin": "http://testserver"})
+        return login((client, store, engine, seed, password), name)
+
+    employee = applicant((TestClient(app), store), "new-employee")
+    other = staff("reader")
+    approver = staff("admin")
+    new = create(employee)
+    assert approver.get("/api/me").json()["can_review_applications"] is True
+    assert other.get("/api/me").json()["can_review_applications"] is False
+    assert employee.get("/api/me").json()["can_review_applications"] is False
+    assert {d["id"] for d in approver.get("/api/applications").json()} == {existing, new}
+    assert other.get("/api/applications").json() == []
+    assert other.get(f"/api/applications/{existing}").status_code == 404
+    for action, extra in [
+        ("review", {"decision": "approve"}),
+        ("publish", {"acknowledge_restart": True}),
+        ("complete", {}),
+    ]:
+        assert other.post(
+            f"/api/applications/{existing}/{action}", json={"version": 1, **extra}
+        ).status_code == 403
+    assert other.get("/api/clients").status_code == 200
+    approve(approver, existing)
+    assert detail(approver, existing)["reviewer"] == "admin"
+    assert detail(employee, new)["status"] == "submitted"
 
 
 def test_application_full_flow_and_identity_isolation(system):

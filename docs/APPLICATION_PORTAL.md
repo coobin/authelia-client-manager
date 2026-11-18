@@ -6,6 +6,17 @@ The administrator console is at `/admin` with its existing independent login.
 The portal replaces the offline application form; the authentication integration
 requirements still apply.
 
+Set `ACM_APPLICATION_APPROVER` on the web service to the exact username of
+the local administrator who handles all access requests. This applies to
+existing and future applications. Only that administrator can see the shared
+queue and review, publish, or confirm acceptance of requests. With no value set,
+any local administrator can handle requests. Administrator permissions outside
+the application workflow are unaffected.
+
+Sign in to the administrator console to open the application queue by default
+if your account can review applications. The homepage also shows this queue
+when opened with an active reviewer session. Pending reviews appear first.
+
 ## Employee login configuration
 
 Register one confidential OIDC client for this manager itself. Use authorization

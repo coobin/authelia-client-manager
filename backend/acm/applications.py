@@ -103,10 +103,10 @@ class Acceptance(Revision):
     results: str = Field(min_length=20, max_length=6000)
 
 
-def install_applications(app, s, a, current, admin, fresh):
+def install_applications(app, s, a, current, can_review, approver, fresh_approver):
     def row(c, aid, u):
         r = c.execute("SELECT * FROM applications WHERE id=?", (aid,)).fetchone()
-        if not r or (u["role"] != "admin" and r["applicant"] != u["username"]):
+        if not r or (not can_review(u) and r["applicant"] != u["username"]):
             raise HTTPException(404, "申请不存在")
         return r
 
@@ -188,7 +188,7 @@ def install_applications(app, s, a, current, admin, fresh):
     @app.get("/api/applications")
     def applications(u=Depends(current)):
         with s.connect() as c:
-            if u["role"] == "admin":
+            if can_review(u):
                 rows = c.execute(
                     "SELECT * FROM applications ORDER BY created DESC,rowid DESC"
                 ).fetchall()
@@ -289,7 +289,7 @@ def install_applications(app, s, a, current, admin, fresh):
         return {"ok": True}
 
     @app.post("/api/applications/{aid}/review")
-    def review(aid: str, body: Review, u=Depends(admin)):
+    def review(aid: str, body: Review, u=Depends(approver)):
         if body.decision != "approve" and not body.comment.strip():
             raise HTTPException(422, "请填写退回或拒绝原因")
         with s.connect() as c:
@@ -326,7 +326,7 @@ def install_applications(app, s, a, current, admin, fresh):
         return {"ok": True}
 
     @app.post("/api/applications/{aid}/publish")
-    def publish(aid: str, body: Publish, u=Depends(fresh)):
+    def publish(aid: str, body: Publish, u=Depends(fresh_approver)):
         if not body.acknowledge_restart:
             raise HTTPException(400, "请确认发布会重启认证服务")
         jobs = a.call("GET", "/jobs")
@@ -514,7 +514,7 @@ def install_applications(app, s, a, current, admin, fresh):
         return {"ok": True}
 
     @app.post("/api/applications/{aid}/complete")
-    def complete(aid: str, body: Revision, u=Depends(admin)):
+    def complete(aid: str, body: Revision, u=Depends(approver)):
         with s.connect() as c:
             r = row(c, aid, u)
         if serialize(r)["status"] != "ready" or not r["acceptance"]:
