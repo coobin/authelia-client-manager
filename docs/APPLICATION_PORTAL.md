@@ -16,6 +16,7 @@ the application workflow are unaffected.
 Sign in to the administrator console to open the application queue by default
 if your account can review applications. The homepage also shows this queue
 when opened with an active reviewer session. Pending reviews appear first.
+An employee session can still open the separate administrator login at `/admin`.
 
 ## Employee login configuration
 

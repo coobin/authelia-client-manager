@@ -561,8 +561,7 @@ function App() {
       />
     );
   if (!loaded) return <div className="loading">正在打开管理工具…</div>;
-  if (me?.role === "applicant") return <ApplicantPortal />;
-  if (!me)
+  if (!me || me.role === "applicant")
     return (
       <main className="login-page">
         <div className="login-brand">
@@ -611,7 +610,9 @@ function App() {
           <p>
             {setupRequired
               ? "设置你的账号和密码，完成后即可开始使用。"
-              : "输入账号和密码登录。"}
+              : me?.role === "applicant"
+                ? "当前使用员工统一账号。请使用本地管理员账号和密码登录。"
+                : "输入账号和密码登录。"}
           </p>
           <label>
             账号
